@@ -1,9 +1,13 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import type { StoredLabGoal } from "@getpaseo/protocol/lab/types";
-import { evaluateCommand } from "./evaluator.js";
+import { promisify } from "node:util";
+import { evaluateChangePolicy, evaluateCommand } from "./evaluator.js";
+
+const execFileAsync = promisify(execFile);
 
 describe("evaluateCommand", () => {
   let cwd: string;
@@ -34,5 +38,25 @@ describe("evaluateCommand", () => {
     expect(failed).toMatchObject({ passed: false, evidence: { exitCode: 7, stderr: "bad" } });
     expect(failed.evidence.artifactHash).toHaveLength(64);
     expect(failed.evidence.candidateHash).toHaveLength(64);
+  });
+
+  test("blocks forbidden or out-of-scope changes before command Gates run", async () => {
+    await execFileAsync("git", ["init"], { cwd });
+    await writeFile(join(cwd, "evaluator-secret.ts"), "modified");
+    await writeFile(join(cwd, "outside.ts"), "modified");
+    const result = await evaluateChangePolicy({
+      goal: {
+        evaluatorVersion: "lab-evaluator/v1",
+        allowedActions: ["src/**"],
+        forbiddenActions: ["evaluator-*.ts"],
+      } as StoredLabGoal,
+      cwd,
+      now: () => new Date("2026-08-16T00:00:00.000Z"),
+    });
+
+    expect(result).toMatchObject({ passed: false, evidence: { kind: "policy", exitCode: 1 } });
+    expect(result.violations).toEqual(
+      expect.arrayContaining(["evaluator-secret.ts", "outside.ts"]),
+    );
   });
 });

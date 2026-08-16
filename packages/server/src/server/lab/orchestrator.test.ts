@@ -274,6 +274,6 @@ describe("LabGoalOrchestrator", () => {
     expect(completed?.issues).toMatchObject([
       { finder: "evaluator", ownerAssignmentId: completed?.assignments[0]?.id, severity: "high" },
     ]);
-    expect(completed?.evidence).toHaveLength(4);
+    expect(completed?.evidence).toHaveLength(6);
   });
 });

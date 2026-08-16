@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { Logger } from "pino";
 import type { EvaluatorCommandResult } from "./evaluator.js";
-import { evaluateCommand } from "./evaluator.js";
+import { evaluateChangePolicy, evaluateCommand } from "./evaluator.js";
 import { reviewerPrompt, reviewOutputToArtifacts } from "./review.js";
 import type { StoredLabGoal } from "@getpaseo/protocol/lab/types";
 import type { BoundCreateAgentCommand } from "../agent/create-agent/create.js";
@@ -288,6 +288,40 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
     if (commands.length === 0) {
       await this.options.service.advance(goal.id, "needs_human", "No executable acceptance gates");
       return false;
+    }
+    const policy = await evaluateChangePolicy({ goal, cwd, now: this.now });
+    await this.options.service.recordEvidence(goal.id, policy.evidence);
+    await this.options.service.recordGate(goal.id, {
+      id: `gate_${randomUUID()}`,
+      gate: "verification",
+      verdict: policy.passed ? "passed" : "failed",
+      summary: policy.passed
+        ? "Changed-path policy passed"
+        : `Changed-path policy failed: ${policy.violations.join(", ")}`,
+      evidence: [policy.evidence.id],
+      issueFingerprint: policy.passed ? null : policy.evidence.artifactHash,
+      createdAt: this.now().toISOString(),
+    });
+    if (!policy.passed) {
+      const routed = await this.options.service.routeIssueForRepair(goal.id, {
+        id: `issue_${randomUUID()}`,
+        fingerprint: createHash("sha256")
+          .update(`policy:${policy.violations.sort().join("|")}`)
+          .digest("hex"),
+        finder: "evaluator",
+        ownerAssignmentId,
+        severity: "critical",
+        summary: `Candidate violates frozen change policy: ${policy.violations.join(", ")}`,
+        reproduction: "git status --porcelain=v1",
+        evidenceIds: [policy.evidence.id],
+        reacceptance: ["policy:changed-paths", ...goal.acceptanceCriteria],
+        status: "open",
+        createdAt: this.now().toISOString(),
+        updatedAt: this.now().toISOString(),
+        waivedAt: null,
+        waivedReason: null,
+      });
+      return routed.state === "repairing";
     }
     const evaluate = this.options.evaluateCommand ?? evaluateCommand;
     for (const command of commands) {

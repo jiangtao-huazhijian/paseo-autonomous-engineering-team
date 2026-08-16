@@ -11,6 +11,10 @@ export interface EvaluatorCommandResult {
   passed: boolean;
 }
 
+export interface EvaluatorPolicyResult extends EvaluatorCommandResult {
+  violations: string[];
+}
+
 function digest(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
@@ -27,6 +31,64 @@ async function gitValue(cwd: string, args: string[]): Promise<string> {
   } catch {
     return "unavailable";
   }
+}
+
+function globMatches(path: string, pattern: string): boolean {
+  const escaped = pattern
+    .replace(/[|\\{}()[\]^$+?.]/g, "\\$&")
+    .replaceAll("**", "\u0000")
+    .replaceAll("*", "[^/]*")
+    .replaceAll("\u0000", ".*");
+  return new RegExp(`^${escaped}$`).test(path);
+}
+
+function changedPaths(status: string): string[] {
+  return status
+    .split("\n")
+    .filter(Boolean)
+    .map((line) => line.slice(3))
+    .map((path) => (path.includes(" -> ") ? (path.split(" -> ").at(-1) ?? path) : path))
+    .map((path) => path.replace(/^"|"$/g, ""));
+}
+
+/** Checks actual worktree paths before commands can falsely certify a candidate. */
+export async function evaluateChangePolicy(input: {
+  goal: StoredLabGoal;
+  cwd: string;
+  now: () => Date;
+}): Promise<EvaluatorPolicyResult> {
+  const status = await gitValue(input.cwd, ["status", "--porcelain=v1"]);
+  const paths = status === "unavailable" ? [] : changedPaths(status);
+  const forbidden = paths.filter((path) =>
+    input.goal.forbiddenActions.some((pattern) => globMatches(path, pattern)),
+  );
+  const outsideAllowed =
+    input.goal.allowedActions.length === 0
+      ? []
+      : paths.filter(
+          (path) => !input.goal.allowedActions.some((pattern) => globMatches(path, pattern)),
+        );
+  const violations = [...new Set([...forbidden, ...outsideAllowed])];
+  const command = "policy:changed-paths";
+  const stdout = paths.join("\n");
+  const stderr = violations.length > 0 ? `Policy violations:\n${violations.join("\n")}` : "";
+  const artifactHash = digest(`${command}\n${stdout}\n${stderr}`);
+  return {
+    passed: violations.length === 0,
+    violations,
+    evidence: {
+      id: `evidence_${randomUUID()}`,
+      kind: "policy",
+      candidateHash: digest(status),
+      command,
+      exitCode: violations.length === 0 ? 0 : 1,
+      stdout,
+      stderr,
+      environmentFingerprint: digest(`policy:${input.goal.evaluatorVersion}`),
+      artifactHash,
+      createdAt: input.now().toISOString(),
+    },
+  };
 }
 
 export async function evaluateCommand(input: {
