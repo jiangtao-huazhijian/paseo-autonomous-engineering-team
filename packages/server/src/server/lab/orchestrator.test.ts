@@ -74,7 +74,9 @@ describe("LabGoalOrchestrator", () => {
           receivedPrompt = String(prompt);
           return {
             canceled: false,
-            finalText: "Implemented health endpoint",
+            finalText: String(prompt).includes("independent Reviewer")
+              ? '{"issues":[]}'
+              : "Implemented health endpoint",
             timeline: [],
             sessionId: "s",
           };
@@ -87,14 +89,17 @@ describe("LabGoalOrchestrator", () => {
 
     const updated = await service.inspect(goal.id);
     expect(updated).toMatchObject({ state: "completed", workspaceId: "wks_lab" });
-    expect(updated?.assignments).toMatchObject([
+    expect(updated?.assignments.find((assignment) => assignment.role === "builder")).toMatchObject({
+      agentId: "agent_builder",
+      workspaceId: "wks_lab",
+      state: "succeeded",
+    });
+    expect(updated?.assignments.find((assignment) => assignment.role === "reviewer")).toMatchObject(
       {
-        role: "builder",
-        agentId: "agent_builder",
-        workspaceId: "wks_lab",
+        provider: "claude",
         state: "succeeded",
       },
-    ]);
+    );
     expect(receivedPrompt).toContain("GET /health");
     expect(receivedPrompt).toContain("evaluator/**");
   });
@@ -147,7 +152,15 @@ describe("LabGoalOrchestrator", () => {
         },
       }),
       agentManager: {
-        runAgent: async () => {
+        runAgent: async (_agentId, prompt) => {
+          if (String(prompt).includes("independent Reviewer")) {
+            return {
+              canceled: false,
+              finalText: '{"issues":[]}',
+              timeline: [],
+              sessionId: "review",
+            };
+          }
           runCount += 1;
           return new Promise((resolve) => {
             if (runCount === 1) settleFirst = resolve as (value: never) => void;
@@ -211,7 +224,15 @@ describe("LabGoalOrchestrator", () => {
           initialPromptError: null,
         }) as never) as BoundCreateAgentCommand,
       agentManager: {
-        runAgent: async () => {
+        runAgent: async (_agentId, prompt) => {
+          if (String(prompt).includes("independent Reviewer")) {
+            return {
+              canceled: false,
+              finalText: '{"issues":[]}',
+              timeline: [],
+              sessionId: "review",
+            };
+          }
           builderRuns += 1;
           return {
             canceled: false,
@@ -253,6 +274,6 @@ describe("LabGoalOrchestrator", () => {
     expect(completed?.issues).toMatchObject([
       { finder: "evaluator", ownerAssignmentId: completed?.assignments[0]?.id, severity: "high" },
     ]);
-    expect(completed?.evidence).toHaveLength(2);
+    expect(completed?.evidence).toHaveLength(4);
   });
 });

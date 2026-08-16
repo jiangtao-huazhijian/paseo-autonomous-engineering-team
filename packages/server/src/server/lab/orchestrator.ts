@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { Logger } from "pino";
 import type { EvaluatorCommandResult } from "./evaluator.js";
 import { evaluateCommand } from "./evaluator.js";
+import { reviewerPrompt, reviewOutputToArtifacts } from "./review.js";
 import type { StoredLabGoal } from "@getpaseo/protocol/lab/types";
 import type { BoundCreateAgentCommand } from "../agent/create-agent/create.js";
 import { formatProviderModel } from "../agent/create-agent/create.js";
@@ -40,6 +41,12 @@ function requireBuilder(goal: StoredLabGoal) {
   const builder = goal.roleProviders.find((role) => role.role === "builder" && role.enabled);
   if (!builder) throw new Error(`Goal ${goal.id} has no enabled builder`);
   return builder;
+}
+
+function requireReviewer(goal: StoredLabGoal) {
+  const reviewer = goal.roleProviders.find((role) => role.role === "reviewer" && role.enabled);
+  if (!reviewer) throw new Error(`Goal ${goal.id} has no enabled reviewer`);
+  return reviewer;
 }
 
 function builderPrompt(goal: StoredLabGoal): string {
@@ -208,7 +215,7 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
           ? "Builder repaired evaluator findings; awaiting re-evaluation"
           : "Builder completed; awaiting independent review",
       );
-      const shouldContinue = await this.runEvaluator(afterBuild, workspaceCwd, assignmentId);
+      const shouldContinue = await this.runReviewer(afterBuild, workspaceCwd, assignmentId);
       if (shouldContinue) this.continueRequestedGoalIds.add(goal.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -299,7 +306,7 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
         const fingerprint = createHash("sha256")
           .update(`evaluator:${command}:${result.evidence.artifactHash}`)
           .digest("hex");
-        const routed = await this.options.service.routeEvaluationFailure(goal.id, {
+        const routed = await this.options.service.routeIssueForRepair(goal.id, {
           id: `issue_${randomUUID()}`,
           fingerprint,
           finder: "evaluator",
@@ -340,5 +347,89 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
       createdAt: this.now().toISOString(),
     });
     return false;
+  }
+
+  private async runReviewer(
+    goal: StoredLabGoal,
+    cwd: string,
+    ownerAssignmentId: string,
+  ): Promise<boolean> {
+    const reviewer = requireReviewer(goal);
+    const existing = goal.assignments.find(
+      (assignment) => assignment.role === "reviewer" && assignment.agentId,
+    );
+    const assignmentId = existing?.id ?? `assignment_${randomUUID()}`;
+    let agentId = existing?.agentId ?? null;
+    if (!existing) {
+      await this.options.service.addAssignment(goal.id, {
+        id: assignmentId,
+        role: "reviewer",
+        provider: reviewer.provider,
+        model: reviewer.model ?? null,
+        agentId: null,
+        workspaceId: goal.workspaceId,
+        state: "planned",
+        startedAt: null,
+        endedAt: null,
+        lastProgress: null,
+        error: null,
+      });
+      const created = await this.options.createAgent({
+        kind: "mcp",
+        provider: formatProviderModel(reviewer.provider, reviewer.model),
+        config: {
+          provider: reviewer.provider,
+          cwd,
+          ...(reviewer.model ? { model: reviewer.model } : {}),
+        },
+        cwd,
+        workspaceId: goal.workspaceId ?? undefined,
+        title: `[Lab Reviewer] ${goal.title}`,
+        labels: { "paseo.lab-goal-id": goal.id, "paseo.lab-role": "reviewer" },
+        unattended: true,
+        promptFailure: "return-error",
+        background: true,
+        notifyOnFinish: false,
+      });
+      if (created.initialPromptError) throw created.initialPromptError;
+      agentId = created.snapshot.id;
+      await this.options.service.updateAssignment(goal.id, assignmentId, {
+        agentId,
+        state: "running",
+        startedAt: this.now().toISOString(),
+      });
+    }
+    if (!agentId) throw new Error(`Reviewer assignment ${assignmentId} has no agent`);
+    await this.options.ensureAgentLoaded?.(agentId);
+    const result = await this.options.agentManager.runAgent(agentId, reviewerPrompt(goal));
+    if (result.canceled) return false;
+    await this.options.service.updateAssignment(goal.id, assignmentId, {
+      state: "succeeded",
+      endedAt: this.now().toISOString(),
+      lastProgress: result.finalText || "Reviewer completed",
+    });
+    const artifacts = reviewOutputToArtifacts({
+      goal,
+      ownerAssignmentId,
+      output: result.finalText,
+      now: this.now,
+    });
+    await this.options.service.recordEvidence(goal.id, artifacts.evidence);
+    if (artifacts.parseError) {
+      await this.options.service.advance(goal.id, "needs_human", artifacts.parseError);
+      return false;
+    }
+    const blocking = artifacts.issues.filter((issue) =>
+      ["high", "critical"].includes(issue.severity),
+    );
+    if (blocking.length > 0) {
+      const routed = await this.options.service.routeIssueForRepair(goal.id, blocking[0]!);
+      for (const issue of artifacts.issues.slice(1))
+        await this.options.service.upsertIssue(goal.id, issue);
+      return routed.state === "repairing";
+    }
+    await this.options.service.resolveReviewerIssues(goal.id);
+    for (const issue of artifacts.issues) await this.options.service.upsertIssue(goal.id, issue);
+    return this.runEvaluator(goal, cwd, ownerAssignmentId);
   }
 }

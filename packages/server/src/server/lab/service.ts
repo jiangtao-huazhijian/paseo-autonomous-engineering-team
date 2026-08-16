@@ -238,8 +238,8 @@ export class LabGoalService {
     return updated;
   }
 
-  /** Evaluator-only failure route: duplicate fingerprints never spend a repair round. */
-  async routeEvaluationFailure(id: string, issue: LabIssue): Promise<StoredLabGoal> {
+  /** Deterministic failure route: duplicate fingerprints never spend a repair round. */
+  async routeIssueForRepair(id: string, issue: LabIssue): Promise<StoredLabGoal> {
     const updated = await this.store.update(id, (goal) => {
       const duplicate = goal.issues.some(
         (candidate) => candidate.fingerprint === issue.fingerprint,
@@ -279,6 +279,20 @@ export class LabGoalService {
       ...goal,
       issues: goal.issues.map((issue) =>
         issue.finder === "evaluator" && issue.status === "open"
+          ? { ...issue, status: "resolved", updatedAt: this.now().toISOString() }
+          : issue,
+      ),
+      updatedAt: this.now().toISOString(),
+    }));
+    if (!updated) throw new Error(`Goal not found: ${id}`);
+    return updated;
+  }
+
+  async resolveReviewerIssues(id: string): Promise<StoredLabGoal> {
+    const updated = await this.store.update(id, (goal) => ({
+      ...goal,
+      issues: goal.issues.map((issue) =>
+        issue.finder === "reviewer" && issue.status === "open"
           ? { ...issue, status: "resolved", updatedAt: this.now().toISOString() }
           : issue,
       ),

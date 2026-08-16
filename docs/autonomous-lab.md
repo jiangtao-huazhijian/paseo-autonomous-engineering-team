@@ -52,7 +52,13 @@ assignment. The Builder is a real Paseo agent, constrained to that worktree and
 to the Goal's allowed/forbidden actions; it cannot merge, deploy, or edit
 evaluator assets. When the Builder finishes, the Goal enters `reviewing`.
 
-The first evaluator loop is now present. A separate system process executes
+The first heterogeneous review and evaluator loops are now present. A Reviewer
+is created as a separate Paseo Agent using the configured Reviewer provider;
+its provider must differ from the Builder's. The Reviewer is instructed to
+remain read-only and must return schema-validated JSON Issues. High/critical
+review Issues route back to the original Builder before deterministic evaluation.
+
+A separate system process executes
 the frozen command acceptance criteria in the Goal worktree and records
 content-addressed `Evidence`: candidate hash, command, exit code, bounded logs,
 environment fingerprint, and artifact hash. A failed command creates a
