@@ -54,6 +54,21 @@ describe("LabGoalOrchestrator", () => {
           snapshot: { id: "agent_builder" },
           initialPromptError: null,
         }) as never) as BoundCreateAgentCommand,
+      evaluateCommand: async ({ command, now }) => ({
+        passed: true,
+        evidence: {
+          id: "evidence_pass",
+          kind: "command",
+          candidateHash: "candidate",
+          command,
+          exitCode: 0,
+          stdout: "ok",
+          stderr: "",
+          environmentFingerprint: "environment",
+          artifactHash: "artifact",
+          createdAt: now().toISOString(),
+        },
+      }),
       agentManager: {
         runAgent: async (_agentId, prompt) => {
           receivedPrompt = String(prompt);
@@ -71,7 +86,7 @@ describe("LabGoalOrchestrator", () => {
     await orchestrator.start(queued.id);
 
     const updated = await service.inspect(goal.id);
-    expect(updated).toMatchObject({ state: "reviewing", workspaceId: "wks_lab" });
+    expect(updated).toMatchObject({ state: "completed", workspaceId: "wks_lab" });
     expect(updated?.assignments).toMatchObject([
       {
         role: "builder",
@@ -116,6 +131,21 @@ describe("LabGoalOrchestrator", () => {
           snapshot: { id: "agent_builder" },
           initialPromptError: null,
         }) as never) as BoundCreateAgentCommand,
+      evaluateCommand: async ({ command, now }) => ({
+        passed: true,
+        evidence: {
+          id: "evidence_pass",
+          kind: "command",
+          candidateHash: "candidate",
+          command,
+          exitCode: 0,
+          stdout: "ok",
+          stderr: "",
+          environmentFingerprint: "environment",
+          artifactHash: "artifact",
+          createdAt: now().toISOString(),
+        },
+      }),
       agentManager: {
         runAgent: async () => {
           runCount += 1;
@@ -146,7 +176,83 @@ describe("LabGoalOrchestrator", () => {
       sessionId: "second",
     } as never);
     await vi.waitFor(async () => {
-      expect((await service.inspect(goal.id))?.state).toBe("reviewing");
+      expect((await service.inspect(goal.id))?.state).toBe("completed");
     });
+  });
+
+  test("routes failed frozen evidence back to the same Builder and re-tests after repair", async () => {
+    const goal = await service.create({
+      title: "Repair evaluator failure",
+      repositoryPath: "/repo",
+      mode: "deliver",
+      objective: "Fix the deliberately failing check",
+      acceptanceCriteria: ["npm test"],
+      allowedActions: ["src/**"],
+      forbiddenActions: ["evaluator/**"],
+      roleProviders: [
+        { role: "builder", provider: "codex" },
+        { role: "reviewer", provider: "claude" },
+      ],
+      budget: { maxRounds: 3, maxAgents: 2, maxDurationMinutes: 60, maxRepairRounds: 2 },
+    });
+    const queued = await service.action(goal.id, "queue");
+    let builderRuns = 0;
+    let evaluatorRuns = 0;
+    const orchestrator = new LabGoalOrchestrator({
+      service,
+      logger: pino({ level: "silent" }),
+      createWorktree: async () =>
+        ({
+          workspace: { workspaceId: "wks_lab", cwd: "/worktree" },
+        }) as CreatePaseoWorktreeWorkflowResult,
+      createAgent: (async () =>
+        ({
+          snapshot: { id: "agent_builder" },
+          initialPromptError: null,
+        }) as never) as BoundCreateAgentCommand,
+      agentManager: {
+        runAgent: async () => {
+          builderRuns += 1;
+          return {
+            canceled: false,
+            finalText: `Builder pass ${builderRuns}`,
+            timeline: [],
+            sessionId: "s",
+          };
+        },
+        cancelAgentRun: async () => ({ status: "settled" }),
+      } as Pick<AgentManager, "runAgent" | "cancelAgentRun">,
+      evaluateCommand: async ({ command, now }) => {
+        evaluatorRuns += 1;
+        const passed = evaluatorRuns > 1;
+        return {
+          passed,
+          evidence: {
+            id: `evidence_${evaluatorRuns}`,
+            kind: "command",
+            candidateHash: `candidate_${evaluatorRuns}`,
+            command,
+            exitCode: passed ? 0 : 1,
+            stdout: "",
+            stderr: passed ? "" : "intentional failure",
+            environmentFingerprint: "environment",
+            artifactHash: `artifact_${evaluatorRuns}`,
+            createdAt: now().toISOString(),
+          },
+        };
+      },
+    });
+
+    await orchestrator.start(queued.id);
+    await vi.waitFor(async () => expect((await service.inspect(goal.id))?.state).toBe("completed"));
+
+    const completed = await service.inspect(goal.id);
+    expect(builderRuns).toBe(2);
+    expect(evaluatorRuns).toBe(2);
+    expect(completed?.repairRound).toBe(1);
+    expect(completed?.issues).toMatchObject([
+      { finder: "evaluator", ownerAssignmentId: completed?.assignments[0]?.id, severity: "high" },
+    ]);
+    expect(completed?.evidence).toHaveLength(2);
   });
 });

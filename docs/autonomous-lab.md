@@ -50,8 +50,16 @@ the first real execution leg:
 Queue creates one dedicated Paseo-managed worktree and one persisted **Builder**
 assignment. The Builder is a real Paseo agent, constrained to that worktree and
 to the Goal's allowed/forbidden actions; it cannot merge, deploy, or edit
-evaluator assets. When the Builder finishes, the Goal enters `reviewing` — it
-does **not** claim completion.
+evaluator assets. When the Builder finishes, the Goal enters `reviewing`.
+
+The first evaluator loop is now present. A separate system process executes
+the frozen command acceptance criteria in the Goal worktree and records
+content-addressed `Evidence`: candidate hash, command, exit code, bounded logs,
+environment fingerprint, and artifact hash. A failed command creates a
+high-severity evaluator `Issue`, routes the repair to the same Builder, and
+re-runs the complete frozen command set. Repair rounds are hard-limited;
+duplicate evaluator failures require human input instead of looping. Only an
+evaluator-recorded passed acceptance gate can complete a Goal.
 
 The daemon restores queued/planning/implementing Goals after restart. An
 existing Builder session is loaded from persistence before the Goal continues.
@@ -73,10 +81,10 @@ budget), rather than an underspecified free-form prompt.
 
 ## Explicitly not implemented yet
 
-This is not yet a complete heterogeneous team: the independent Reviewer,
-Verifier, evaluator command runner, issue-fingerprint/repair loop, and the
-evaluator-only acceptance gate are the next slices. Consequently a Builder
-finishing in `reviewing` is an intentional stop, not a successful Goal.
+This is not yet a complete heterogeneous team: independent Reviewer and
+optional Verifier assignments, read-only enforcement, review Issue/waive UI,
+allowed/forbidden-path policy Gates, outbox reconciliation, hidden-test
+isolation, and final reports are the next slices.
 
 ## Acceptance checks for this slice
 
@@ -87,6 +95,7 @@ node node_modules/vitest/vitest.mjs run \
   packages/server/src/server/lab/state-machine.test.ts \
   packages/server/src/server/lab/service.test.ts \
   packages/server/src/server/lab/orchestrator.test.ts \
+  packages/server/src/server/lab/evaluator.test.ts \
   packages/server/src/server/session/lab/lab-goal-session.test.ts \
   packages/cli/src/commands/goal/index.test.ts \
   --maxWorkers=1

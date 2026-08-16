@@ -1,5 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Logger } from "pino";
+import type { EvaluatorCommandResult } from "./evaluator.js";
+import { evaluateCommand } from "./evaluator.js";
 import type { StoredLabGoal } from "@getpaseo/protocol/lab/types";
 import type { BoundCreateAgentCommand } from "../agent/create-agent/create.js";
 import { formatProviderModel } from "../agent/create-agent/create.js";
@@ -18,6 +20,12 @@ export interface LabGoalOrchestratorOptions {
   createAgent: BoundCreateAgentCommand;
   agentManager: LabAgentManager;
   ensureAgentLoaded?: (agentId: string) => Promise<void>;
+  evaluateCommand?: (input: {
+    goal: StoredLabGoal;
+    cwd: string;
+    command: string;
+    now: () => Date;
+  }) => Promise<EvaluatorCommandResult>;
   createWorktree: (input: {
     cwd: string;
     worktreeSlug: string;
@@ -35,6 +43,7 @@ function requireBuilder(goal: StoredLabGoal) {
 }
 
 function builderPrompt(goal: StoredLabGoal): string {
+  const repairIssues = goal.issues.filter((issue) => issue.status === "open");
   return [
     "You are the Builder in a controlled Autonomous Lab Goal.",
     "You are the only role allowed to modify product code.",
@@ -44,6 +53,16 @@ function builderPrompt(goal: StoredLabGoal): string {
     `Forbidden changes:\n${goal.forbiddenActions.map((item) => `- ${item}`).join("\n") || "- none declared"}`,
     `Frozen acceptance criteria:\n${goal.acceptanceCriteria.map((item) => `- ${item}`).join("\n")}`,
     "Work only in the current worktree. Do not merge, deploy, change evaluator assets, or weaken tests.",
+    ...(repairIssues.length > 0
+      ? [
+          `Open evaluator issues to repair:\n${repairIssues
+            .map(
+              (issue) =>
+                `- ${issue.id} [${issue.severity}] ${issue.summary}\n  Reproduce: ${issue.reproduction}\n  Reaccept: ${issue.reacceptance.join(", ")}`,
+            )
+            .join("\n")}`,
+        ]
+      : []),
     "Implement the objective, run relevant local checks, and report what changed plus any blockers.",
   ].join("\n\n");
 }
@@ -57,6 +76,7 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
   private readonly activeGoalIds = new Set<string>();
   /** A resume arriving while cancellation is still settling is replayed once. */
   private readonly resumeRequestedGoalIds = new Set<string>();
+  private readonly continueRequestedGoalIds = new Set<string>();
   private readonly now: () => Date;
 
   constructor(private readonly options: LabGoalOrchestratorOptions) {
@@ -79,7 +99,7 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
           "Creating isolated Goal worktree",
         );
       }
-      if (goal.state !== "planning" && goal.state !== "implementing") return;
+      if (!["planning", "implementing", "repairing"].includes(goal.state)) return;
 
       let workspaceId = goal.workspaceId;
       let workspaceCwd = goal.repositoryPath;
@@ -181,11 +201,15 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
         endedAt: this.now().toISOString(),
         lastProgress: result.finalText || "Builder completed",
       });
-      await this.options.service.advance(
+      const afterBuild = await this.options.service.advance(
         goal.id,
         "reviewing",
-        "Builder completed; awaiting independent review",
+        goal.state === "repairing"
+          ? "Builder repaired evaluator findings; awaiting re-evaluation"
+          : "Builder completed; awaiting independent review",
       );
+      const shouldContinue = await this.runEvaluator(afterBuild, workspaceCwd, assignmentId);
+      if (shouldContinue) this.continueRequestedGoalIds.add(goal.id);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       this.options.logger.error({ err: error, goalId }, "Lab Goal builder execution failed");
@@ -210,6 +234,8 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
     } finally {
       this.activeGoalIds.delete(goalId);
       if (this.resumeRequestedGoalIds.delete(goalId)) {
+        void this.start(goalId);
+      } else if (this.continueRequestedGoalIds.delete(goalId)) {
         void this.start(goalId);
       }
     }
@@ -237,5 +263,82 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
         lastProgress: `Builder ${action} requested`,
       });
     }
+  }
+
+  private async runEvaluator(
+    reviewingGoal: StoredLabGoal,
+    cwd: string,
+    ownerAssignmentId: string,
+  ): Promise<boolean> {
+    const goal = await this.options.service.advance(
+      reviewingGoal.id,
+      "verifying",
+      "Independent evaluator started frozen acceptance gates",
+    );
+    const commands = goal.acceptanceCriteria.filter(
+      (criterion) => !criterion.startsWith("independent_review:"),
+    );
+    if (commands.length === 0) {
+      await this.options.service.advance(goal.id, "needs_human", "No executable acceptance gates");
+      return false;
+    }
+    const evaluate = this.options.evaluateCommand ?? evaluateCommand;
+    for (const command of commands) {
+      const result = await evaluate({ goal, cwd, command, now: this.now });
+      await this.options.service.recordEvidence(goal.id, result.evidence);
+      await this.options.service.recordGate(goal.id, {
+        id: `gate_${randomUUID()}`,
+        gate: "verification",
+        verdict: result.passed ? "passed" : "failed",
+        summary: result.passed ? `Passed: ${command}` : `Failed: ${command}`,
+        evidence: [result.evidence.id],
+        issueFingerprint: result.passed ? null : result.evidence.artifactHash,
+        createdAt: this.now().toISOString(),
+      });
+      if (!result.passed) {
+        const fingerprint = createHash("sha256")
+          .update(`evaluator:${command}:${result.evidence.artifactHash}`)
+          .digest("hex");
+        const routed = await this.options.service.routeEvaluationFailure(goal.id, {
+          id: `issue_${randomUUID()}`,
+          fingerprint,
+          finder: "evaluator",
+          ownerAssignmentId,
+          severity: "high",
+          summary: `Frozen acceptance command failed: ${command}`,
+          reproduction: command,
+          evidenceIds: [result.evidence.id],
+          reacceptance: goal.acceptanceCriteria,
+          status: "open",
+          createdAt: this.now().toISOString(),
+          updatedAt: this.now().toISOString(),
+          waivedAt: null,
+          waivedReason: null,
+        });
+        return routed.state === "repairing";
+      }
+    }
+    const finalGoal = await this.options.service.resolveEvaluatorIssues(goal.id);
+    const hasBlockingIssue = finalGoal?.issues.some(
+      (issue) => issue.status === "open" && ["high", "critical"].includes(issue.severity),
+    );
+    if (hasBlockingIssue) {
+      await this.options.service.advance(
+        goal.id,
+        "needs_human",
+        "Open blocking review issues remain",
+      );
+      return false;
+    }
+    await this.options.service.recordGate(goal.id, {
+      id: `gate_${randomUUID()}`,
+      gate: "acceptance",
+      verdict: "passed",
+      summary: "All executable frozen acceptance commands passed",
+      evidence: (finalGoal?.evidence ?? []).map((evidence) => evidence.id),
+      issueFingerprint: null,
+      createdAt: this.now().toISOString(),
+    });
+    return false;
   }
 }

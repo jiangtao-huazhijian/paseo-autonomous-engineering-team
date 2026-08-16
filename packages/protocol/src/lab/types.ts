@@ -64,6 +64,45 @@ export type LabGoalSpec = z.infer<typeof LabGoalSpecSchema>;
 export const LabGateVerdictSchema = z.enum(["passed", "failed", "needs_human"]);
 export type LabGateVerdict = z.infer<typeof LabGateVerdictSchema>;
 
+export const LabIssueSeveritySchema = z.enum(["low", "medium", "high", "critical"]);
+export type LabIssueSeverity = z.infer<typeof LabIssueSeveritySchema>;
+
+export const LabIssueStatusSchema = z.enum(["open", "resolved", "waived"]);
+export type LabIssueStatus = z.infer<typeof LabIssueStatusSchema>;
+
+/** Immutable evaluator output; logs remain bounded but are content-addressed. */
+export const LabEvidenceSchema = z.object({
+  id: z.string(),
+  kind: z.enum(["command", "policy", "review"]),
+  candidateHash: z.string().trim().min(1),
+  command: z.string().trim().min(1),
+  exitCode: z.number().int().nullable(),
+  stdout: z.string(),
+  stderr: z.string(),
+  environmentFingerprint: z.string().trim().min(1),
+  artifactHash: z.string().trim().min(1),
+  createdAt: z.string(),
+});
+export type LabEvidence = z.infer<typeof LabEvidenceSchema>;
+
+export const LabIssueSchema = z.object({
+  id: z.string(),
+  fingerprint: z.string().trim().min(1),
+  finder: z.enum(["reviewer", "verifier", "evaluator"]),
+  ownerAssignmentId: z.string().nullable(),
+  severity: LabIssueSeveritySchema,
+  summary: z.string().trim().min(1),
+  reproduction: z.string().trim().min(1),
+  evidenceIds: z.array(z.string()).default([]),
+  reacceptance: z.array(z.string().trim().min(1)).default([]),
+  status: LabIssueStatusSchema,
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  waivedAt: z.string().nullable(),
+  waivedReason: z.string().nullable(),
+});
+export type LabIssue = z.infer<typeof LabIssueSchema>;
+
 export const LabAssignmentStateSchema = z.enum([
   "planned",
   "running",
@@ -113,12 +152,16 @@ export const StoredLabGoalSchema = LabGoalSpecSchema.extend({
   state: LabGoalStateSchema,
   stateBeforePause: LabGoalStateSchema.nullable(),
   repairRound: z.number().int().nonnegative(),
+  frozenAt: z.string(),
+  evaluatorVersion: z.string().trim().min(1),
   workspaceId: z.string().nullable().default(null),
   assignments: z.array(LabAgentAssignmentSchema).default([]),
   createdAt: z.string(),
   updatedAt: z.string(),
   transitions: z.array(LabGoalTransitionSchema),
   gateRecords: z.array(LabGateRecordSchema),
+  evidence: z.array(LabEvidenceSchema).default([]),
+  issues: z.array(LabIssueSchema).default([]),
 });
 export type StoredLabGoal = z.infer<typeof StoredLabGoalSchema>;
 

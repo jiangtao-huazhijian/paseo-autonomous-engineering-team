@@ -3,7 +3,9 @@ import { join } from "node:path";
 import type {
   CreateLabGoalInput,
   LabAgentAssignment,
+  LabEvidence,
   LabGateRecord,
+  LabIssue,
   StoredLabGoal,
 } from "@getpaseo/protocol/lab/types";
 import { LabGoalStore } from "./store.js";
@@ -50,12 +52,16 @@ export class LabGoalService {
       state: "draft",
       stateBeforePause: null,
       repairRound: 0,
+      frozenAt: timestamp,
+      evaluatorVersion: "lab-evaluator/v1",
       workspaceId: null,
       assignments: [],
       createdAt: timestamp,
       updatedAt: timestamp,
       transitions: [],
       gateRecords: [],
+      evidence: [],
+      issues: [],
     });
   }
 
@@ -196,6 +202,89 @@ export class LabGoalService {
     if (!updated) {
       throw new Error(`Goal not found: ${id}`);
     }
+    return updated;
+  }
+
+  async recordEvidence(id: string, evidence: LabEvidence): Promise<StoredLabGoal> {
+    const updated = await this.store.update(id, (goal) => ({
+      ...goal,
+      evidence: [...goal.evidence, evidence],
+      updatedAt: this.now().toISOString(),
+    }));
+    if (!updated) throw new Error(`Goal not found: ${id}`);
+    return updated;
+  }
+
+  /** Merge duplicate observations instead of consuming another repair round. */
+  async upsertIssue(id: string, issue: LabIssue): Promise<StoredLabGoal> {
+    const updated = await this.store.update(id, (goal) => {
+      const existing = goal.issues.find((candidate) => candidate.fingerprint === issue.fingerprint);
+      const issues = existing
+        ? goal.issues.map((candidate) =>
+            candidate.fingerprint === issue.fingerprint
+              ? {
+                  ...candidate,
+                  ...issue,
+                  id: candidate.id,
+                  createdAt: candidate.createdAt,
+                  status: candidate.status === "waived" ? "waived" : issue.status,
+                }
+              : candidate,
+          )
+        : [...goal.issues, issue];
+      return { ...goal, issues, updatedAt: this.now().toISOString() };
+    });
+    if (!updated) throw new Error(`Goal not found: ${id}`);
+    return updated;
+  }
+
+  /** Evaluator-only failure route: duplicate fingerprints never spend a repair round. */
+  async routeEvaluationFailure(id: string, issue: LabIssue): Promise<StoredLabGoal> {
+    const updated = await this.store.update(id, (goal) => {
+      const duplicate = goal.issues.some(
+        (candidate) => candidate.fingerprint === issue.fingerprint,
+      );
+      const withIssue = duplicate
+        ? goal
+        : { ...goal, issues: [...goal.issues, issue], updatedAt: this.now().toISOString() };
+      if (duplicate) {
+        return transitionLabGoal(
+          withIssue,
+          "needs_human",
+          `Repeated evaluator failure: ${issue.summary}`,
+          this.now(),
+        );
+      }
+      if (goal.repairRound >= goal.budget.maxRepairRounds) {
+        return transitionLabGoal(
+          withIssue,
+          "budget_exhausted",
+          "Maximum repair rounds exhausted",
+          this.now(),
+        );
+      }
+      return transitionLabGoal(
+        { ...withIssue, repairRound: goal.repairRound + 1 },
+        "repairing",
+        `Evaluator failure routed to Builder: ${issue.id}`,
+        this.now(),
+      );
+    });
+    if (!updated) throw new Error(`Goal not found: ${id}`);
+    return updated;
+  }
+
+  async resolveEvaluatorIssues(id: string): Promise<StoredLabGoal> {
+    const updated = await this.store.update(id, (goal) => ({
+      ...goal,
+      issues: goal.issues.map((issue) =>
+        issue.finder === "evaluator" && issue.status === "open"
+          ? { ...issue, status: "resolved", updatedAt: this.now().toISOString() }
+          : issue,
+      ),
+      updatedAt: this.now().toISOString(),
+    }));
+    if (!updated) throw new Error(`Goal not found: ${id}`);
     return updated;
   }
 }
