@@ -104,6 +104,9 @@ IDs are replaced with the user's verified daemon providers.
 Operational setup, backup, rollback, mobile access, and human-takeover steps
 are in [Autonomous Lab operations](./autonomous-lab-operations.md).
 
+The requirement-by-requirement evidence ledger is in
+[V1.1 completion audit](./autonomous-lab-v1-completion-audit.md).
+
 The daemon restores queued/planning/implementing Goals after restart. An
 existing Builder session is loaded from persistence before the Goal continues.
 Pause/cancel request the underlying Builder run to stop; a resume received
