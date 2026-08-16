@@ -9,6 +9,7 @@ import type {
   StoredLabGoal,
 } from "@getpaseo/protocol/lab/types";
 import { LabGoalStore } from "./store.js";
+import { renderGoalReport } from "./report.js";
 import { resumeLabGoal, transitionLabGoal } from "./state-machine.js";
 
 export type LabGoalAction =
@@ -70,6 +71,7 @@ export class LabGoalService {
       evidence: [],
       issues: [],
       auditEvents: [],
+      finalReport: null,
     });
   }
 
@@ -235,7 +237,13 @@ export class LabGoalService {
         );
       }
       if (gateRecord.gate === "acceptance" && gateRecord.verdict === "passed") {
-        return transitionLabGoal(withRecord, "completed", "Acceptance gate passed", this.now());
+        const completed = transitionLabGoal(
+          withRecord,
+          "completed",
+          "Acceptance gate passed",
+          this.now(),
+        );
+        return { ...completed, finalReport: renderGoalReport(completed) };
       }
       return withRecord;
     });

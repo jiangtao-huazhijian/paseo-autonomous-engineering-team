@@ -95,6 +95,8 @@ describe("LabGoalService", () => {
 
     expect(completed.state).toBe("completed");
     expect(completed.gateRecords).toHaveLength(1);
+    expect(completed.finalReport).toContain("# Autonomous Lab delivery: Add a health endpoint");
+    expect(completed.finalReport).toContain("acceptance: **passed**");
   });
 
   test("restarts queued, planning, and implementing goals after a daemon restart", async () => {

@@ -92,6 +92,7 @@ function inspectRows(goal: StoredLabGoal): Array<{ key: string; value: string }>
     { key: "Issues", value: JSON.stringify(goal.issues) },
     { key: "Evidence", value: JSON.stringify(goal.evidence) },
     { key: "Audit", value: JSON.stringify(goal.auditEvents) },
+    { key: "FinalReport", value: goal.finalReport ?? "null" },
     { key: "Transitions", value: JSON.stringify(goal.transitions) },
   ];
 }

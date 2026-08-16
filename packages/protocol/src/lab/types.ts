@@ -170,6 +170,7 @@ export const StoredLabGoalSchema = LabGoalSpecSchema.extend({
   evidence: z.array(LabEvidenceSchema).default([]),
   issues: z.array(LabIssueSchema).default([]),
   auditEvents: z.array(LabGoalAuditEventSchema).default([]),
+  finalReport: z.string().nullable().default(null),
 });
 export type StoredLabGoal = z.infer<typeof StoredLabGoalSchema>;
 

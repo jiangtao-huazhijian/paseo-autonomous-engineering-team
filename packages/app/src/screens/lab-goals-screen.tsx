@@ -276,6 +276,12 @@ function GoalDetailsSheet({
             style={styles.detailText}
           >{`${evidence.kind} · ${evidence.exitCode ?? "n/a"} · ${evidence.command}`}</Text>
         ))}
+        {goal.finalReport ? (
+          <>
+            <Text style={styles.detailLabel}>Delivery report</Text>
+            <Text style={styles.detailText}>{goal.finalReport}</Text>
+          </>
+        ) : null}
       </ScrollView>
     </AdaptiveModalSheet>
   );

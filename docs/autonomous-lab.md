@@ -77,6 +77,11 @@ worktree/Agent is created. Repair-round exhaustion is also terminal; estimated
 provider cost remains advisory because providers do not expose one reliable
 cross-provider billing signal.
 
+When, and only when, the Evaluator records a passing acceptance Gate, the Goal
+persists a Markdown delivery report. It is derived from stored assignments,
+Gates, Issues, Evidence, and budget data, and is exposed from the Goal detail
+view and `paseo goal show`.
+
 The daemon restores queued/planning/implementing Goals after restart. An
 existing Builder session is loaded from persistence before the Goal continues.
 Pause/cancel request the underlying Builder run to stop; a resume received
