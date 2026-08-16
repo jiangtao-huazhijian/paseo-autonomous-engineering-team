@@ -96,6 +96,9 @@ The fixture's `goal.json` freezes source/test/script paths, forbids
 configuration. It is suitable for a real smoke run after its example Provider
 IDs are replaced with the user's verified daemon providers.
 
+Operational setup, backup, rollback, mobile access, and human-takeover steps
+are in [Autonomous Lab operations](./autonomous-lab-operations.md).
+
 The daemon restores queued/planning/implementing Goals after restart. An
 existing Builder session is loaded from persistence before the Goal continues.
 Pause/cancel request the underlying Builder run to stop; a resume received
