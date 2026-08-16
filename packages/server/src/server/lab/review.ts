@@ -31,18 +31,20 @@ export function reviewOutputToArtifacts(input: {
   goal: StoredLabGoal;
   ownerAssignmentId: string;
   output: string;
+  finder?: "reviewer" | "verifier";
   now: () => Date;
 }): { evidence: LabEvidence; issues: LabIssue[]; parseError: string | null } {
   const artifactHash = createHash("sha256").update(input.output).digest("hex");
+  const finder = input.finder ?? "reviewer";
   const evidence: LabEvidence = {
     id: `evidence_${randomUUID()}`,
     kind: "review",
     candidateHash: artifactHash,
-    command: "reviewer structured report",
+    command: `${finder} structured report`,
     exitCode: 0,
     stdout: input.output.slice(0, 64 * 1024),
     stderr: "",
-    environmentFingerprint: `reviewer:${input.goal.evaluatorVersion}`,
+    environmentFingerprint: `${finder}:${input.goal.evaluatorVersion}`,
     artifactHash,
     createdAt: input.now().toISOString(),
   };
@@ -50,11 +52,11 @@ export function reviewOutputToArtifacts(input: {
   try {
     parsed = JSON.parse(input.output);
   } catch {
-    return { evidence, issues: [], parseError: "Reviewer did not return valid JSON" };
+    return { evidence, issues: [], parseError: `${finder} did not return valid JSON` };
   }
   const result = ReviewResponseSchema.safeParse(parsed);
   if (!result.success) {
-    return { evidence, issues: [], parseError: "Reviewer JSON did not match the Issue schema" };
+    return { evidence, issues: [], parseError: `${finder} JSON did not match the Issue schema` };
   }
   return {
     evidence,
@@ -62,9 +64,9 @@ export function reviewOutputToArtifacts(input: {
     issues: result.data.issues.map((issue) => ({
       id: `issue_${randomUUID()}`,
       fingerprint: createHash("sha256")
-        .update(`review:${issue.files.sort().join("|")}:${issue.summary.toLowerCase().trim()}`)
+        .update(`${finder}:${issue.files.sort().join("|")}:${issue.summary.toLowerCase().trim()}`)
         .digest("hex"),
-      finder: "reviewer",
+      finder,
       ownerAssignmentId: input.ownerAssignmentId,
       severity: issue.severity,
       summary: issue.summary,

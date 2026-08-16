@@ -58,6 +58,11 @@ its provider must differ from the Builder's. The Reviewer is instructed to
 remain read-only and must return schema-validated JSON Issues. High/critical
 review Issues route back to the original Builder before deterministic evaluation.
 
+An optional Verifier provider is launched only after a frozen Evaluator command
+fails. It reproduces and diagnoses the failure into the same Evidence/Issue
+stream, but has no authority to pass or fail a Gate; an absent Verifier does
+not block the Evaluator-only delivery path.
+
 A separate system process executes
 the frozen command acceptance criteria in the Goal worktree and records
 content-addressed `Evidence`: candidate hash, command, exit code, bounded logs,

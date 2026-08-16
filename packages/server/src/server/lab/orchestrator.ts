@@ -49,6 +49,10 @@ function requireReviewer(goal: StoredLabGoal) {
   return reviewer;
 }
 
+function optionalVerifier(goal: StoredLabGoal) {
+  return goal.roleProviders.find((role) => role.role === "verifier" && role.enabled) ?? null;
+}
+
 function builderPrompt(goal: StoredLabGoal): string {
   const repairIssues = goal.issues.filter((issue) => issue.status === "open");
   return [
@@ -353,6 +357,7 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
         createdAt: this.now().toISOString(),
       });
       if (!result.passed) {
+        await this.runVerifier(goal, cwd, ownerAssignmentId, command, result.evidence.stderr);
         const fingerprint = createHash("sha256")
           .update(`evaluator:${command}:${result.evidence.artifactHash}`)
           .digest("hex");
@@ -375,6 +380,7 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
         return routed.state === "repairing";
       }
     }
+    await this.options.service.resolveVerifierIssues(goal.id);
     const finalGoal = await this.options.service.resolveEvaluatorIssues(goal.id);
     const hasBlockingIssue = finalGoal?.issues.some(
       (issue) => issue.status === "open" && ["high", "critical"].includes(issue.severity),
@@ -489,6 +495,97 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
     await this.options.service.resolveReviewerIssues(goal.id);
     for (const issue of artifacts.issues) await this.options.service.upsertIssue(goal.id, issue);
     return this.runEvaluator(goal, cwd, ownerAssignmentId);
+  }
+
+  /** Diagnostic-only: it never creates a Gate or changes the evaluator verdict. */
+  // oxlint-disable-next-line complexity
+  private async runVerifier(
+    goal: StoredLabGoal,
+    cwd: string,
+    ownerAssignmentId: string,
+    failedCommand: string,
+    evaluatorStderr: string,
+  ): Promise<void> {
+    const verifier = optionalVerifier(goal);
+    if (!verifier) return;
+    try {
+      const existing = goal.assignments.find(
+        (assignment) => assignment.role === "verifier" && assignment.agentId,
+      );
+      const assignmentId = existing?.id ?? `assignment_${randomUUID()}`;
+      let agentId = existing?.agentId ?? null;
+      if (!existing) {
+        if (!this.canCreateAgent(goal)) return;
+        await this.options.service.addAssignment(goal.id, {
+          id: assignmentId,
+          role: "verifier",
+          provider: verifier.provider,
+          model: verifier.model ?? null,
+          agentId: null,
+          workspaceId: goal.workspaceId,
+          state: "planned",
+          startedAt: null,
+          endedAt: null,
+          lastProgress: null,
+          error: null,
+        });
+        const created = await this.options.createAgent({
+          kind: "mcp",
+          provider: formatProviderModel(verifier.provider, verifier.model),
+          config: {
+            provider: verifier.provider,
+            cwd,
+            ...(verifier.model ? { model: verifier.model } : {}),
+          },
+          cwd,
+          workspaceId: goal.workspaceId ?? undefined,
+          title: `[Lab Verifier] ${goal.title}`,
+          labels: { "paseo.lab-goal-id": goal.id, "paseo.lab-role": "verifier" },
+          unattended: true,
+          promptFailure: "return-error",
+          background: true,
+          notifyOnFinish: false,
+        });
+        if (created.initialPromptError) throw created.initialPromptError;
+        agentId = created.snapshot.id;
+        await this.options.service.updateAssignment(goal.id, assignmentId, {
+          agentId,
+          state: "running",
+          startedAt: this.now().toISOString(),
+        });
+      }
+      if (!agentId) return;
+      await this.options.ensureAgentLoaded?.(agentId);
+      const result = await this.options.agentManager.runAgent(
+        agentId,
+        [
+          "You are a read-only Verifier. Reproduce and diagnose the evaluator failure; do not change files.",
+          `Failed frozen command: ${failedCommand}`,
+          `Evaluator stderr:\n${evaluatorStderr || "(none)"}`,
+          'Return JSON only: {"issues":[{"severity":"high","summary":"...","reproduction":"...","files":["..."]}]}',
+        ].join("\n\n"),
+      );
+      await this.options.service.updateAssignment(goal.id, assignmentId, {
+        state: result.canceled ? "cancelled" : "succeeded",
+        endedAt: this.now().toISOString(),
+        lastProgress: result.finalText || "Verifier completed",
+      });
+      if (result.canceled) return;
+      const artifacts = reviewOutputToArtifacts({
+        goal,
+        ownerAssignmentId,
+        output: result.finalText,
+        finder: "verifier",
+        now: this.now,
+      });
+      await this.options.service.recordEvidence(goal.id, artifacts.evidence);
+      if (!artifacts.parseError) {
+        for (const issue of artifacts.issues)
+          await this.options.service.upsertIssue(goal.id, issue);
+      }
+    } catch (error) {
+      this.options.logger.warn({ err: error, goalId: goal.id }, "Lab Verifier diagnostic failed");
+    }
   }
 
   private isWallTimeExhausted(goal: StoredLabGoal): boolean {

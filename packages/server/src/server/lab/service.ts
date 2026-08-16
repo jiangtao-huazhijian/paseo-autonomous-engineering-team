@@ -341,6 +341,20 @@ export class LabGoalService {
     if (!updated) throw new Error(`Goal not found: ${id}`);
     return updated;
   }
+
+  async resolveVerifierIssues(id: string): Promise<StoredLabGoal> {
+    const updated = await this.store.update(id, (goal) => ({
+      ...goal,
+      issues: goal.issues.map((issue) =>
+        issue.finder === "verifier" && issue.status === "open"
+          ? { ...issue, status: "resolved", updatedAt: this.now().toISOString() }
+          : issue,
+      ),
+      updatedAt: this.now().toISOString(),
+    }));
+    if (!updated) throw new Error(`Goal not found: ${id}`);
+    return updated;
+  }
 }
 
 const labServices = new Map<string, LabGoalService>();

@@ -207,8 +207,9 @@ describe("LabGoalOrchestrator", () => {
       roleProviders: [
         { role: "builder", provider: "codex" },
         { role: "reviewer", provider: "claude" },
+        { role: "verifier", provider: "copilot" },
       ],
-      budget: { maxRounds: 3, maxAgents: 2, maxDurationMinutes: 60, maxRepairRounds: 2 },
+      budget: { maxRounds: 3, maxAgents: 3, maxDurationMinutes: 60, maxRepairRounds: 2 },
     });
     const queued = await service.action(goal.id, "queue");
     let builderRuns = 0;
@@ -234,6 +235,15 @@ describe("LabGoalOrchestrator", () => {
               finalText: '{"issues":[]}',
               timeline: [],
               sessionId: "review",
+            };
+          }
+          if (String(prompt).includes("read-only Verifier")) {
+            return {
+              canceled: false,
+              finalText:
+                '{"issues":[{"severity":"high","summary":"Reproduced failure","reproduction":"npm test","files":["src/test.ts"]}]}',
+              timeline: [],
+              sessionId: "verify",
             };
           }
           builderRuns += 1;
@@ -274,10 +284,22 @@ describe("LabGoalOrchestrator", () => {
     expect(builderRuns).toBe(2);
     expect(evaluatorRuns).toBe(2);
     expect(completed?.repairRound).toBe(1);
-    expect(completed?.issues).toMatchObject([
-      { finder: "evaluator", ownerAssignmentId: completed?.assignments[0]?.id, severity: "high" },
-    ]);
-    expect(completed?.evidence).toHaveLength(6);
+    expect(completed?.issues.find((issue) => issue.finder === "evaluator")).toMatchObject({
+      ownerAssignmentId: completed?.assignments[0]?.id,
+      severity: "high",
+      status: "resolved",
+    });
+    expect(completed?.issues.find((issue) => issue.finder === "verifier")).toMatchObject({
+      severity: "high",
+      status: "resolved",
+    });
+    expect(
+      completed?.assignments.find((assignment) => assignment.role === "verifier"),
+    ).toMatchObject({
+      provider: "copilot",
+      state: "succeeded",
+    });
+    expect(completed?.evidence).toHaveLength(7);
   });
 
   test("hard-stops before creating an Agent when the wall-time budget is exhausted", async () => {
