@@ -42,6 +42,18 @@ import {
   ScheduleUpdateResponseSchema,
 } from "./schedule/rpc-schemas.js";
 import {
+  LabGoalActionRequestSchema,
+  LabGoalActionResponseSchema,
+  LabGoalCreateRequestSchema,
+  LabGoalCreateResponseSchema,
+  LabGoalGateRecordRequestSchema,
+  LabGoalGateRecordResponseSchema,
+  LabGoalInspectRequestSchema,
+  LabGoalInspectResponseSchema,
+  LabGoalListRequestSchema,
+  LabGoalListResponseSchema,
+} from "./lab/rpc-schemas.js";
+import {
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -2864,6 +2876,11 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ScheduleDeleteRequestSchema,
   ScheduleRunOnceRequestSchema,
   ScheduleUpdateRequestSchema,
+  LabGoalCreateRequestSchema,
+  LabGoalListRequestSchema,
+  LabGoalInspectRequestSchema,
+  LabGoalActionRequestSchema,
+  LabGoalGateRecordRequestSchema,
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -5823,6 +5840,11 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   ScheduleDeleteResponseSchema,
   ScheduleRunOnceResponseSchema,
   ScheduleUpdateResponseSchema,
+  LabGoalCreateResponseSchema,
+  LabGoalListResponseSchema,
+  LabGoalInspectResponseSchema,
+  LabGoalActionResponseSchema,
+  LabGoalGateRecordResponseSchema,
   LoopRunResponseSchema,
   LoopListResponseSchema,
   LoopInspectResponseSchema,
@@ -5995,6 +6017,11 @@ export type ScheduleResumeResponse = z.infer<typeof ScheduleResumeResponseSchema
 export type ScheduleDeleteResponse = z.infer<typeof ScheduleDeleteResponseSchema>;
 export type ScheduleRunOnceResponse = z.infer<typeof ScheduleRunOnceResponseSchema>;
 export type ScheduleUpdateResponse = z.infer<typeof ScheduleUpdateResponseSchema>;
+export type LabGoalCreateResponse = z.infer<typeof LabGoalCreateResponseSchema>;
+export type LabGoalListResponse = z.infer<typeof LabGoalListResponseSchema>;
+export type LabGoalInspectResponse = z.infer<typeof LabGoalInspectResponseSchema>;
+export type LabGoalActionResponse = z.infer<typeof LabGoalActionResponseSchema>;
+export type LabGoalGateRecordResponse = z.infer<typeof LabGoalGateRecordResponseSchema>;
 export type LoopRunResponse = z.infer<typeof LoopRunResponseSchema>;
 export type LoopListResponse = z.infer<typeof LoopListResponseSchema>;
 export type LoopInspectResponse = z.infer<typeof LoopInspectResponseSchema>;

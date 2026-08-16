@@ -54,6 +54,9 @@ $PASEO_HOME/
 │       └── {agentId}.json               # One file per agent
 ├── schedules/
 │   └── {scheduleId}.json                # One file per schedule
+├── lab/
+│   └── goals/
+│       └── {goalId}.json                 # Autonomous Lab goal and gate evidence
 ├── projects/
 │   ├── projects.json                    # Project registry
 │   ├── workspaces.json                  # Workspace registry

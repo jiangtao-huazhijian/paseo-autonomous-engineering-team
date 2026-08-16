@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import type { CreateLabGoalInput, LabGateRecord } from "@getpaseo/protocol/lab/types";
 import { CLIENT_CAPS, type ClientCapability } from "@getpaseo/protocol/client-capabilities";
 import type { AgentAttentionNotificationPayload } from "@getpaseo/protocol/agent-attention-notification";
 import {
@@ -532,6 +533,26 @@ type ScheduleUpdatePayload = Extract<
   SessionOutboundMessage,
   { type: "schedule/update/response" }
 >["payload"];
+export type LabGoalCreatePayload = Extract<
+  SessionOutboundMessage,
+  { type: "lab.goal.create.response" }
+>["payload"];
+export type LabGoalListPayload = Extract<
+  SessionOutboundMessage,
+  { type: "lab.goal.list.response" }
+>["payload"];
+export type LabGoalInspectPayload = Extract<
+  SessionOutboundMessage,
+  { type: "lab.goal.inspect.response" }
+>["payload"];
+export type LabGoalActionPayload = Extract<
+  SessionOutboundMessage,
+  { type: "lab.goal.action.response" }
+>["payload"];
+export type LabGoalGateRecordPayload = Extract<
+  SessionOutboundMessage,
+  { type: "lab.goal.gate-record.response" }
+>["payload"];
 export type FetchAgentTimelinePayload = FetchAgentTimelineResponseMessage["payload"];
 export type AgentForkContextPayload = AgentForkContextResponseMessage["payload"];
 
@@ -741,6 +762,18 @@ export interface UpdateScheduleOptions {
   maxRuns?: number | null;
   expiresAt?: string | null;
   requestId?: string;
+}
+export type CreateLabGoalOptions = CreateLabGoalInput & { requestId?: string };
+export interface InspectLabGoalOptions {
+  id: string;
+  requestId?: string;
+}
+export interface LabGoalActionOptions extends InspectLabGoalOptions {
+  action: "queue" | "pause" | "resume" | "cancel" | "start" | "mark-blocked";
+  reason?: string;
+}
+export interface LabGoalGateRecordOptions extends InspectLabGoalOptions {
+  record: LabGateRecord;
 }
 export interface RenameBranchInput {
   cwd: string;
@@ -5188,6 +5221,52 @@ export class DaemonClient {
         ...(options.expiresAt !== undefined ? { expiresAt: options.expiresAt } : {}),
       },
       responseType: "schedule/update/response",
+    });
+  }
+
+  async labGoalCreate(options: CreateLabGoalOptions): Promise<LabGoalCreatePayload> {
+    const { requestId, ...input } = options;
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "lab.goal.create.request", ...input },
+      responseType: "lab.goal.create.response",
+    });
+  }
+
+  async labGoalList(requestId?: string): Promise<LabGoalListPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId,
+      message: { type: "lab.goal.list.request" },
+      responseType: "lab.goal.list.response",
+    });
+  }
+
+  async labGoalInspect(options: InspectLabGoalOptions): Promise<LabGoalInspectPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "lab.goal.inspect.request", goalId: options.id },
+      responseType: "lab.goal.inspect.response",
+    });
+  }
+
+  async labGoalAction(options: LabGoalActionOptions): Promise<LabGoalActionPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: {
+        type: "lab.goal.action.request",
+        goalId: options.id,
+        action: options.action,
+        ...(options.reason ? { reason: options.reason } : {}),
+      },
+      responseType: "lab.goal.action.response",
+    });
+  }
+
+  async labGoalRecordGate(options: LabGoalGateRecordOptions): Promise<LabGoalGateRecordPayload> {
+    return this.sendCorrelatedSessionRequest({
+      requestId: options.requestId,
+      message: { type: "lab.goal.gate-record.request", goalId: options.id, record: options.record },
+      responseType: "lab.goal.gate-record.response",
     });
   }
 

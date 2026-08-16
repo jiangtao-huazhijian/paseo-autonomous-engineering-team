@@ -159,6 +159,7 @@ import {
   createGitMetadataGenerator,
 } from "./session/checkout/git-metadata-generator.js";
 import { ScheduleSession } from "./session/schedule/schedule-session.js";
+import { LabGoalSession } from "./session/lab/lab-goal-session.js";
 import { ProviderCatalogSession } from "./session/provider/provider-catalog-session.js";
 import { WorkspaceFilesSession } from "./session/files/workspace-files-session.js";
 import { AgentConfigSession } from "./session/agent-config/agent-config-session.js";
@@ -204,6 +205,7 @@ import type { Resolvable } from "./speech/provider-resolver.js";
 import type { SpeechReadinessSnapshot } from "./speech/speech-runtime.js";
 import type pino from "pino";
 import { ScheduleService } from "./schedule/service.js";
+import { getLabGoalService } from "./lab/service.js";
 import {
   createGitHubService,
   GitHubAuthenticationError,
@@ -668,6 +670,7 @@ export class Session {
   private readonly voiceSession: VoiceSession;
   private readonly checkoutSession: CheckoutSession;
   private readonly scheduleSession: ScheduleSession;
+  private readonly labGoalSession: LabGoalSession;
   private readonly providerCatalogSession: ProviderCatalogSession;
   private readonly workspaceFilesSession: WorkspaceFilesSession;
   private readonly agentConfigSession: AgentConfigSession;
@@ -677,6 +680,10 @@ export class Session {
   private readonly workspaceScripts: WorkspaceScriptsService;
   private readonly createAgentLifecycleDispatch: CreateAgentLifecycleDispatch;
 
+  // This constructor already assembles the established session subsystems.
+  // Keep the Lab session alongside ScheduleSession rather than introducing a
+  // second connection lifecycle just to satisfy a static complexity threshold.
+  // oxlint-disable-next-line complexity
   constructor(options: SessionOptions) {
     const {
       clientId,
@@ -829,6 +836,11 @@ export class Session {
     this.scheduleSession = new ScheduleSession({
       host: { emit: (msg) => this.emit(msg) },
       scheduleService,
+      logger: this.sessionLogger,
+    });
+    this.labGoalSession = new LabGoalSession({
+      host: { emit: (msg) => this.emit(msg) },
+      service: getLabGoalService(paseoHome),
       logger: this.sessionLogger,
     });
     this.providerCatalogSession = new ProviderCatalogSession({
@@ -1833,6 +1845,7 @@ export class Session {
       this.dispatchProviderMessage(msg) ??
       this.dispatchTerminalMessage(msg) ??
       this.dispatchScheduleMessage(msg) ??
+      this.dispatchLabGoalMessage(msg) ??
       this.dispatchMiscMessage(msg);
     if (promise) await promise;
   }
@@ -2267,6 +2280,19 @@ export class Session {
         return this.scheduleSession.handleScheduleRunOnceRequest(msg);
       case "schedule/update":
         return this.scheduleSession.handleScheduleUpdateRequest(msg);
+      default:
+        return undefined;
+    }
+  }
+
+  private dispatchLabGoalMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+    switch (msg.type) {
+      case "lab.goal.create.request":
+      case "lab.goal.list.request":
+      case "lab.goal.inspect.request":
+      case "lab.goal.action.request":
+      case "lab.goal.gate-record.request":
+        return this.labGoalSession.dispatch(msg);
       default:
         return undefined;
     }
