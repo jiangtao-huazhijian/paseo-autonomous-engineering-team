@@ -21,6 +21,7 @@ export interface LabGoalOrchestratorOptions {
   createAgent: BoundCreateAgentCommand;
   agentManager: LabAgentManager;
   ensureAgentLoaded?: (agentId: string) => Promise<void>;
+  resolveWorkspaceCwd?: (workspaceId: string) => Promise<string | null>;
   evaluateCommand?: (input: {
     goal: StoredLabGoal;
     cwd: string;
@@ -118,7 +119,11 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
           "Creating isolated Goal worktree",
         );
       }
-      if (!["planning", "implementing", "repairing"].includes(goal.state)) return;
+      if (
+        !["planning", "implementing", "reviewing", "verifying", "repairing"].includes(goal.state)
+      ) {
+        return;
+      }
 
       let workspaceId = goal.workspaceId;
       let workspaceCwd = goal.repositoryPath;
@@ -133,6 +138,38 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
         workspaceId = worktree.workspace.workspaceId;
         workspaceCwd = worktree.workspace.cwd;
         goal = await this.options.service.bindWorkspace(goal.id, workspaceId);
+      } else {
+        workspaceCwd = (await this.options.resolveWorkspaceCwd?.(workspaceId)) ?? workspaceCwd;
+      }
+
+      const persistedBuilder = goal.assignments.find((assignment) => assignment.role === "builder");
+      if (goal.state === "reviewing") {
+        if (!persistedBuilder) {
+          await this.options.service.advance(
+            goal.id,
+            "needs_human",
+            "Reviewer recovery has no Builder owner",
+          );
+          return;
+        }
+        if (await this.runReviewer(goal, workspaceCwd, persistedBuilder.id)) {
+          this.continueRequestedGoalIds.add(goal.id);
+        }
+        return;
+      }
+      if (goal.state === "verifying") {
+        if (!persistedBuilder) {
+          await this.options.service.advance(
+            goal.id,
+            "needs_human",
+            "Evaluator recovery has no Builder owner",
+          );
+          return;
+        }
+        if (await this.resumeEvaluator(goal, workspaceCwd, persistedBuilder.id)) {
+          this.continueRequestedGoalIds.add(goal.id);
+        }
+        return;
       }
 
       const existingBuilder = goal.assignments.find(
@@ -302,6 +339,14 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
       "verifying",
       "Independent evaluator started frozen acceptance gates",
     );
+    return this.runEvaluatorCommands(goal, cwd, ownerAssignmentId);
+  }
+
+  private async runEvaluatorCommands(
+    goal: StoredLabGoal,
+    cwd: string,
+    ownerAssignmentId: string,
+  ): Promise<boolean> {
     const commands = goal.acceptanceCriteria.filter(
       (criterion) => !criterion.startsWith("independent_review:"),
     );
@@ -403,6 +448,16 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
       createdAt: this.now().toISOString(),
     });
     return false;
+  }
+
+  private async resumeEvaluator(
+    verifyingGoal: StoredLabGoal,
+    cwd: string,
+    ownerAssignmentId: string,
+  ): Promise<boolean> {
+    // The existing verifying state already represents the frozen evaluator lease;
+    // run it without an illegal verifying→verifying state transition.
+    return this.runEvaluatorCommands(verifyingGoal, cwd, ownerAssignmentId);
   }
 
   private async runReviewer(

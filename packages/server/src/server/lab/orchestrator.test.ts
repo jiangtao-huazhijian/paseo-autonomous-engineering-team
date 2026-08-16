@@ -341,4 +341,87 @@ describe("LabGoalOrchestrator", () => {
     expect((await service.inspect(goal.id))?.state).toBe("budget_exhausted");
     expect(createCalls).toBe(0);
   });
+
+  test("recovers a persisted reviewing Goal using its registered workspace", async () => {
+    const goal = await service.create({
+      title: "Recover review",
+      repositoryPath: "/repo",
+      mode: "deliver",
+      objective: "Resume only the review phase",
+      acceptanceCriteria: ["npm test"],
+      allowedActions: ["src/**"],
+      forbiddenActions: [],
+      roleProviders: [
+        { role: "builder", provider: "codex" },
+        { role: "reviewer", provider: "claude" },
+      ],
+      budget: { maxRounds: 2, maxAgents: 2, maxDurationMinutes: 60, maxRepairRounds: 1 },
+    });
+    const planning = await service
+      .action(goal.id, "queue")
+      .then((queued) => service.action(queued.id, "start"));
+    const implementing = await service.advance(planning.id, "implementing", "simulated restart");
+    await service.bindWorkspace(implementing.id, "wks_saved");
+    await service.addAssignment(goal.id, {
+      id: "assignment_builder",
+      role: "builder",
+      provider: "codex",
+      model: null,
+      agentId: "agent_builder",
+      workspaceId: "wks_saved",
+      state: "succeeded",
+      startedAt: null,
+      endedAt: null,
+      lastProgress: null,
+      error: null,
+    });
+    await service.advance(goal.id, "reviewing", "restart during review");
+    let resolvedWorkspace = "";
+    const orchestrator = new LabGoalOrchestrator({
+      service,
+      logger: pino({ level: "silent" }),
+      now: () => new Date("2026-08-16T00:00:00.000Z"),
+      resolveWorkspaceCwd: async (id) => {
+        resolvedWorkspace = id;
+        return "/restored-worktree";
+      },
+      createWorktree: async () => {
+        throw new Error("must not create a second worktree");
+      },
+      createAgent: (async () =>
+        ({
+          snapshot: { id: "agent_reviewer" },
+          initialPromptError: null,
+        }) as never) as BoundCreateAgentCommand,
+      agentManager: {
+        runAgent: async (_agentId, prompt) => ({
+          canceled: false,
+          finalText: String(prompt).includes("independent Reviewer") ? '{"issues":[]}' : "",
+          timeline: [],
+          sessionId: "s",
+        }),
+        cancelAgentRun: async () => ({ status: "settled" }),
+      } as Pick<AgentManager, "runAgent" | "cancelAgentRun">,
+      evaluateCommand: async ({ command, now }) => ({
+        passed: true,
+        evidence: {
+          id: "evidence_recovered",
+          kind: "command",
+          candidateHash: "candidate",
+          command,
+          exitCode: 0,
+          stdout: "ok",
+          stderr: "",
+          environmentFingerprint: "environment",
+          artifactHash: "artifact",
+          createdAt: now().toISOString(),
+        },
+      }),
+    });
+
+    await orchestrator.start(goal.id);
+
+    expect(resolvedWorkspace).toBe("wks_saved");
+    expect((await service.inspect(goal.id))?.state).toBe("completed");
+  });
 });

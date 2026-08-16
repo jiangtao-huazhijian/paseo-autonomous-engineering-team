@@ -86,7 +86,9 @@ export class LabGoalService {
   async recover(): Promise<void> {
     if (!this.orchestrator) return;
     const resumable = (await this.list()).filter((goal) =>
-      ["queued", "planning", "implementing"].includes(goal.state),
+      ["queued", "planning", "implementing", "reviewing", "verifying", "repairing"].includes(
+        goal.state,
+      ),
     );
     for (const goal of resumable) {
       void this.orchestrator.start(goal.id).catch(() => undefined);

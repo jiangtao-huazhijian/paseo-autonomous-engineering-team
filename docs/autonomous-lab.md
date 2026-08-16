@@ -82,6 +82,11 @@ persists a Markdown delivery report. It is derived from stored assignments,
 Gates, Issues, Evidence, and budget data, and is exposed from the Goal detail
 view and `paseo goal show`.
 
+On daemon restart, the service requeues persisted queued/planning/implementing,
+reviewing, verifying, and repairing Goals. The Orchestrator resolves the saved
+Paseo workspace path first, then resumes the specific phase; it does not create
+a duplicate Builder merely because the process restarted.
+
 The daemon restores queued/planning/implementing Goals after restart. An
 existing Builder session is loaded from persistence before the Goal continues.
 Pause/cancel request the underlying Builder run to stop; a resume received

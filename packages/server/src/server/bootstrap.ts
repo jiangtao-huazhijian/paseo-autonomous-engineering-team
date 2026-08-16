@@ -1227,6 +1227,8 @@ export async function createPaseoDaemon(
       ensureAgentLoaded: async (agentId) => {
         await ensureAgentLoaded(agentId, { agentManager, agentStorage, logger });
       },
+      resolveWorkspaceCwd: async (workspaceId) =>
+        (await workspaceRegistry.get(workspaceId))?.cwd ?? null,
     }),
   );
   await scheduleService.start();
