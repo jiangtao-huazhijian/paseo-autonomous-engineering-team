@@ -87,6 +87,15 @@ reviewing, verifying, and repairing Goals. The Orchestrator resolves the saved
 Paseo workspace path first, then resumes the specific phase; it does not create
 a duplicate Builder merely because the process restarted.
 
+## Reproducible fixture
+
+`fixtures/autonomous-lab-history-page` is the V1 delivery demo. It starts with
+one intentional source defect: `npm test` fails while `npm run build` passes.
+The fixture's `goal.json` freezes source/test/script paths, forbids
+`evaluator/**`, and contains the expected Builder/Reviewer/optional-Verifier
+configuration. It is suitable for a real smoke run after its example Provider
+IDs are replaced with the user's verified daemon providers.
+
 The daemon restores queued/planning/implementing Goals after restart. An
 existing Builder session is loaded from persistence before the Goal continues.
 Pause/cancel request the underlying Builder run to stop; a resume received

@@ -1,0 +1,9 @@
+{
+  "name": "autonomous-lab-history-page",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/history.test.js",
+    "build": "node scripts/build.js"
+  }
+}

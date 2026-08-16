@@ -1,0 +1,21 @@
+{
+  "title": "Task history status filter",
+  "repositoryPath": ".",
+  "mode": "deliver",
+  "objective": "Fix the task-history filter so selecting a status returns only matching tasks.",
+  "acceptanceCriteria": ["npm test", "npm run build", "independent_review:no_high_or_critical"],
+  "allowedActions": ["src/**", "test/**", "scripts/**"],
+  "forbiddenActions": ["evaluator/**"],
+  "roleProviders": [
+    { "role": "builder", "provider": "codex", "enabled": true },
+    { "role": "reviewer", "provider": "claude", "enabled": true },
+    { "role": "verifier", "provider": "copilot", "enabled": false }
+  ],
+  "budget": {
+    "maxRounds": 3,
+    "maxAgents": 3,
+    "maxDurationMinutes": 60,
+    "maxRepairRounds": 2,
+    "estimatedCostUsd": null
+  }
+}
