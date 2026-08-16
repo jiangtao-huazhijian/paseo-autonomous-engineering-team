@@ -64,6 +64,31 @@ export type LabGoalSpec = z.infer<typeof LabGoalSpecSchema>;
 export const LabGateVerdictSchema = z.enum(["passed", "failed", "needs_human"]);
 export type LabGateVerdict = z.infer<typeof LabGateVerdictSchema>;
 
+export const LabAssignmentStateSchema = z.enum([
+  "planned",
+  "running",
+  "succeeded",
+  "failed",
+  "cancelled",
+  "lost",
+]);
+export type LabAssignmentState = z.infer<typeof LabAssignmentStateSchema>;
+
+export const LabAgentAssignmentSchema = z.object({
+  id: z.string(),
+  role: LabAgentRoleSchema,
+  provider: AgentProviderSchema,
+  model: z.string().nullable(),
+  agentId: z.string().nullable(),
+  workspaceId: z.string().nullable(),
+  state: LabAssignmentStateSchema,
+  startedAt: z.string().nullable(),
+  endedAt: z.string().nullable(),
+  lastProgress: z.string().nullable(),
+  error: z.string().nullable(),
+});
+export type LabAgentAssignment = z.infer<typeof LabAgentAssignmentSchema>;
+
 export const LabGateRecordSchema = z.object({
   id: z.string(),
   gate: z.enum(["review", "verification", "acceptance"]),
@@ -88,6 +113,8 @@ export const StoredLabGoalSchema = LabGoalSpecSchema.extend({
   state: LabGoalStateSchema,
   stateBeforePause: LabGoalStateSchema.nullable(),
   repairRound: z.number().int().nonnegative(),
+  workspaceId: z.string().nullable().default(null),
+  assignments: z.array(LabAgentAssignmentSchema).default([]),
   createdAt: z.string(),
   updatedAt: z.string(),
   transitions: z.array(LabGoalTransitionSchema),

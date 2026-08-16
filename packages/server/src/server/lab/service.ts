@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type {
   CreateLabGoalInput,
+  LabAgentAssignment,
   LabGateRecord,
   StoredLabGoal,
 } from "@getpaseo/protocol/lab/types";
@@ -10,9 +11,18 @@ import { resumeLabGoal, transitionLabGoal } from "./state-machine.js";
 
 export type LabGoalAction = "queue" | "pause" | "resume" | "cancel" | "start" | "mark-blocked";
 
+export interface LabGoalOrchestrator {
+  start(goalId: string): Promise<void>;
+  control?(
+    goalId: string,
+    action: Extract<LabGoalAction, "pause" | "resume" | "cancel">,
+  ): Promise<void>;
+}
+
 export class LabGoalService {
   private readonly store: LabGoalStore;
   private readonly now: () => Date;
+  private orchestrator: LabGoalOrchestrator | null = null;
 
   constructor(options: { paseoHome: string; now?: () => Date }) {
     this.store = new LabGoalStore(join(options.paseoHome, "lab", "goals"));
@@ -40,11 +50,31 @@ export class LabGoalService {
       state: "draft",
       stateBeforePause: null,
       repairRound: 0,
+      workspaceId: null,
+      assignments: [],
       createdAt: timestamp,
       updatedAt: timestamp,
       transitions: [],
       gateRecords: [],
     });
+  }
+
+  setOrchestrator(orchestrator: LabGoalOrchestrator): void {
+    this.orchestrator = orchestrator;
+  }
+
+  /**
+   * Replays only work that has not reached a human/evaluator decision point.
+   * The persisted Goal record remains the source of truth across daemon restarts.
+   */
+  async recover(): Promise<void> {
+    if (!this.orchestrator) return;
+    const resumable = (await this.list()).filter((goal) =>
+      ["queued", "planning", "implementing"].includes(goal.state),
+    );
+    for (const goal of resumable) {
+      void this.orchestrator.start(goal.id).catch(() => undefined);
+    }
   }
 
   async list(): Promise<StoredLabGoal[]> {
@@ -76,6 +106,15 @@ export class LabGoalService {
     if (!updated) {
       throw new Error(`Goal not found: ${id}`);
     }
+    if (action === "queue" && updated.state === "queued" && this.orchestrator) {
+      void this.orchestrator.start(updated.id).catch(() => undefined);
+    }
+    if (
+      (action === "pause" || action === "resume" || action === "cancel") &&
+      this.orchestrator?.control
+    ) {
+      void this.orchestrator.control(updated.id, action).catch(() => undefined);
+    }
     return updated;
   }
 
@@ -90,6 +129,42 @@ export class LabGoalService {
     if (!updated) {
       throw new Error(`Goal not found: ${id}`);
     }
+    return updated;
+  }
+
+  async bindWorkspace(id: string, workspaceId: string): Promise<StoredLabGoal> {
+    const updated = await this.store.update(id, (goal) => ({
+      ...goal,
+      workspaceId,
+      updatedAt: this.now().toISOString(),
+    }));
+    if (!updated) throw new Error(`Goal not found: ${id}`);
+    return updated;
+  }
+
+  async addAssignment(id: string, assignment: LabAgentAssignment): Promise<StoredLabGoal> {
+    const updated = await this.store.update(id, (goal) => ({
+      ...goal,
+      assignments: [...goal.assignments, assignment],
+      updatedAt: this.now().toISOString(),
+    }));
+    if (!updated) throw new Error(`Goal not found: ${id}`);
+    return updated;
+  }
+
+  async updateAssignment(
+    id: string,
+    assignmentId: string,
+    patch: Partial<LabAgentAssignment>,
+  ): Promise<StoredLabGoal> {
+    const updated = await this.store.update(id, (goal) => ({
+      ...goal,
+      assignments: goal.assignments.map((assignment) =>
+        assignment.id === assignmentId ? { ...assignment, ...patch } : assignment,
+      ),
+      updatedAt: this.now().toISOString(),
+    }));
+    if (!updated) throw new Error(`Goal not found: ${id}`);
     return updated;
   }
 

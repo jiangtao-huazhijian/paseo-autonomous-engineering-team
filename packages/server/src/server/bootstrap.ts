@@ -128,6 +128,7 @@ import type { LocalSpeechProviderConfig } from "./speech/providers/local/config.
 import type { RequestedSpeechProviders } from "./speech/speech-types.js";
 import { createSpeechService } from "./speech/speech-runtime.js";
 import { AgentManager } from "./agent/agent-manager.js";
+import { ensureAgentLoaded } from "./agent/agent-loading.js";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { attachAgentStoragePersistence } from "./persistence-hooks.js";
 import { createAgentMcpServer } from "./agent/mcp-server.js";
@@ -146,6 +147,8 @@ import {
 } from "./workspace-registry.js";
 import { CheckoutDiffManager } from "./checkout-diff-manager.js";
 import { ScheduleService } from "./schedule/service.js";
+import { LabGoalOrchestrator } from "./lab/orchestrator.js";
+import { getLabGoalService } from "./lab/service.js";
 import { DaemonConfigStore, type MutableDaemonConfig } from "./daemon-config-store.js";
 import { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { DaemonConfigBrowserToolsPolicy } from "./browser-tools/policy.js";
@@ -1213,6 +1216,19 @@ export async function createPaseoDaemon(
     createPaseoWorktreeWorkspace: createSchedulePaseoWorktreeExternal,
     archiveWorkspace: archiveScheduleWorkspaceExternal,
   });
+  const labGoalService = getLabGoalService(config.paseoHome);
+  labGoalService.setOrchestrator(
+    new LabGoalOrchestrator({
+      service: labGoalService,
+      logger,
+      createAgent,
+      agentManager,
+      createWorktree: createSchedulePaseoWorktreeExternal,
+      ensureAgentLoaded: async (agentId) => {
+        await ensureAgentLoaded(agentId, { agentManager, agentStorage, logger });
+      },
+    }),
+  );
   await scheduleService.start();
   agentManager.setAgentArchivedCallback(async (agentId) => {
     try {
@@ -1228,6 +1244,8 @@ export async function createPaseoDaemon(
     { elapsed: elapsed() },
     `Agent registry loaded (${persistedRecords.length} record${persistedRecords.length === 1 ? "" : "s"}); agents will initialize on demand`,
   );
+  await labGoalService.recover();
+  logger.info({ elapsed: elapsed() }, "Autonomous Lab Goal recovery scheduled");
   logger.info(
     "Voice mode configured for agent-scoped resume flow (no dedicated voice assistant provider)",
   );

@@ -96,4 +96,19 @@ describe("LabGoalService", () => {
     expect(completed.state).toBe("completed");
     expect(completed.gateRecords).toHaveLength(1);
   });
+
+  test("restarts queued, planning, and implementing goals after a daemon restart", async () => {
+    const goal = await createGoal();
+    await service.action(goal.id, "queue");
+    const restarted: string[] = [];
+    service.setOrchestrator({
+      start: async (goalId) => {
+        restarted.push(goalId);
+      },
+    });
+
+    await service.recover();
+
+    expect(restarted).toEqual([goal.id]);
+  });
 });
