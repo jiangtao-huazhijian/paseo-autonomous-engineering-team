@@ -15,8 +15,7 @@ type LabRequest = Extract<
       | "lab.goal.create.request"
       | "lab.goal.list.request"
       | "lab.goal.inspect.request"
-      | "lab.goal.action.request"
-      | "lab.goal.gate-record.request";
+      | "lab.goal.action.request";
   }
 >;
 
@@ -83,15 +82,6 @@ export class LabGoalSession {
             },
           });
           return;
-        case "lab.goal.gate-record.request":
-          this.options.host.emit({
-            type: "lab.goal.gate-record.response",
-            payload: {
-              requestId: request.requestId,
-              goal: await this.options.service.recordGate(request.goalId, request.record),
-              error: null,
-            },
-          });
       }
     } catch (error) {
       this.emitError(request, error);

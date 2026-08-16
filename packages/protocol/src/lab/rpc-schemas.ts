@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { LabGateRecordSchema, LabGoalSpecSchema, StoredLabGoalSchema } from "./types.js";
+import { LabGoalSpecSchema, StoredLabGoalSchema } from "./types.js";
 
 export const LabGoalCreateRequestSchema = LabGoalSpecSchema.extend({
   type: z.literal("lab.goal.create.request"),
@@ -26,14 +26,6 @@ export const LabGoalActionRequestSchema = z.object({
   issueId: z.string().trim().min(1).optional(),
 });
 
-/** Internal/evaluator-only RPC. The service still validates legal transitions. */
-export const LabGoalGateRecordRequestSchema = z.object({
-  type: z.literal("lab.goal.gate-record.request"),
-  requestId: z.string(),
-  goalId: z.string(),
-  record: LabGateRecordSchema,
-});
-
 const GoalPayloadSchema = z.object({
   requestId: z.string(),
   goal: StoredLabGoalSchema.nullable(),
@@ -52,11 +44,6 @@ export const LabGoalInspectResponseSchema = z.object({
 
 export const LabGoalActionResponseSchema = z.object({
   type: z.literal("lab.goal.action.response"),
-  payload: GoalPayloadSchema,
-});
-
-export const LabGoalGateRecordResponseSchema = z.object({
-  type: z.literal("lab.goal.gate-record.response"),
   payload: GoalPayloadSchema,
 });
 

@@ -1,5 +1,5 @@
 import type { z } from "zod";
-import type { CreateLabGoalInput, LabGateRecord } from "@getpaseo/protocol/lab/types";
+import type { CreateLabGoalInput } from "@getpaseo/protocol/lab/types";
 import { CLIENT_CAPS, type ClientCapability } from "@getpaseo/protocol/client-capabilities";
 import type { AgentAttentionNotificationPayload } from "@getpaseo/protocol/agent-attention-notification";
 import {
@@ -549,10 +549,6 @@ export type LabGoalActionPayload = Extract<
   SessionOutboundMessage,
   { type: "lab.goal.action.response" }
 >["payload"];
-export type LabGoalGateRecordPayload = Extract<
-  SessionOutboundMessage,
-  { type: "lab.goal.gate-record.response" }
->["payload"];
 export type FetchAgentTimelinePayload = FetchAgentTimelineResponseMessage["payload"];
 export type AgentForkContextPayload = AgentForkContextResponseMessage["payload"];
 
@@ -772,9 +768,6 @@ export interface LabGoalActionOptions extends InspectLabGoalOptions {
   action: "queue" | "pause" | "resume" | "cancel" | "start" | "mark-blocked" | "waive-issue";
   reason?: string;
   issueId?: string;
-}
-export interface LabGoalGateRecordOptions extends InspectLabGoalOptions {
-  record: LabGateRecord;
 }
 export interface RenameBranchInput {
   cwd: string;
@@ -5261,14 +5254,6 @@ export class DaemonClient {
         ...(options.issueId ? { issueId: options.issueId } : {}),
       },
       responseType: "lab.goal.action.response",
-    });
-  }
-
-  async labGoalRecordGate(options: LabGoalGateRecordOptions): Promise<LabGoalGateRecordPayload> {
-    return this.sendCorrelatedSessionRequest({
-      requestId: options.requestId,
-      message: { type: "lab.goal.gate-record.request", goalId: options.id, record: options.record },
-      responseType: "lab.goal.gate-record.response",
     });
   }
 

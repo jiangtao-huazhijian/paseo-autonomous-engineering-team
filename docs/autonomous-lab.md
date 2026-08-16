@@ -72,6 +72,11 @@ re-runs the complete frozen command set. Repair rounds are hard-limited;
 duplicate evaluator failures require human input instead of looping. Only an
 evaluator-recorded passed acceptance gate can complete a Goal.
 
+The Gate-write RPC is deliberately not exposed to the PWA, desktop, mobile, or
+CLI clients. Evaluator code writes Gate records through the server-internal
+service only; ordinary users can view evidence and explicitly waive Issues but
+cannot send a synthetic passing acceptance record.
+
 Wall-time and maximum Agent count are enforced as hard budgets before a new
 worktree/Agent is created. Repair-round exhaustion is also terminal; estimated
 provider cost remains advisory because providers do not expose one reliable

@@ -46,8 +46,6 @@ import {
   LabGoalActionResponseSchema,
   LabGoalCreateRequestSchema,
   LabGoalCreateResponseSchema,
-  LabGoalGateRecordRequestSchema,
-  LabGoalGateRecordResponseSchema,
   LabGoalInspectRequestSchema,
   LabGoalInspectResponseSchema,
   LabGoalListRequestSchema,
@@ -2880,7 +2878,6 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   LabGoalListRequestSchema,
   LabGoalInspectRequestSchema,
   LabGoalActionRequestSchema,
-  LabGoalGateRecordRequestSchema,
   LoopRunRequestSchema,
   LoopListRequestSchema,
   LoopInspectRequestSchema,
@@ -5844,7 +5841,6 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   LabGoalListResponseSchema,
   LabGoalInspectResponseSchema,
   LabGoalActionResponseSchema,
-  LabGoalGateRecordResponseSchema,
   LoopRunResponseSchema,
   LoopListResponseSchema,
   LoopInspectResponseSchema,
@@ -6021,7 +6017,6 @@ export type LabGoalCreateResponse = z.infer<typeof LabGoalCreateResponseSchema>;
 export type LabGoalListResponse = z.infer<typeof LabGoalListResponseSchema>;
 export type LabGoalInspectResponse = z.infer<typeof LabGoalInspectResponseSchema>;
 export type LabGoalActionResponse = z.infer<typeof LabGoalActionResponseSchema>;
-export type LabGoalGateRecordResponse = z.infer<typeof LabGoalGateRecordResponseSchema>;
 export type LoopRunResponse = z.infer<typeof LoopRunResponseSchema>;
 export type LoopListResponse = z.infer<typeof LoopListResponseSchema>;
 export type LoopInspectResponse = z.infer<typeof LoopInspectResponseSchema>;

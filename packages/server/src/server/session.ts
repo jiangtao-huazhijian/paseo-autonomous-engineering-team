@@ -2291,7 +2291,6 @@ export class Session {
       case "lab.goal.list.request":
       case "lab.goal.inspect.request":
       case "lab.goal.action.request":
-      case "lab.goal.gate-record.request":
         return this.labGoalSession.dispatch(msg);
       default:
         return undefined;
