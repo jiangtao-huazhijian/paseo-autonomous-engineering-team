@@ -99,6 +99,14 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
     try {
       let goal = await this.options.service.inspect(goalId);
       if (!goal || goal.state === "cancelled" || goal.state === "paused") return;
+      if (this.isWallTimeExhausted(goal)) {
+        await this.options.service.advance(
+          goal.id,
+          "budget_exhausted",
+          "Goal wall-time budget exhausted",
+        );
+        return;
+      }
       if (goal.state === "queued") {
         goal = await this.options.service.advance(
           goal.id,
@@ -130,6 +138,14 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
       const assignmentId = existingBuilder?.id ?? `assignment_${randomUUID()}`;
       let agentId = existingBuilder?.agentId ?? null;
       if (!existingBuilder) {
+        if (!this.canCreateAgent(goal)) {
+          await this.options.service.advance(
+            goal.id,
+            "budget_exhausted",
+            "Goal maximum Agent budget exhausted before creating Builder",
+          );
+          return;
+        }
         goal = await this.options.service.addAssignment(goal.id, {
           id: assignmentId,
           role: "builder",
@@ -395,6 +411,14 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
     const assignmentId = existing?.id ?? `assignment_${randomUUID()}`;
     let agentId = existing?.agentId ?? null;
     if (!existing) {
+      if (!this.canCreateAgent(goal)) {
+        await this.options.service.advance(
+          goal.id,
+          "budget_exhausted",
+          "Goal maximum Agent budget exhausted before creating Reviewer",
+        );
+        return false;
+      }
       await this.options.service.addAssignment(goal.id, {
         id: assignmentId,
         role: "reviewer",
@@ -465,5 +489,15 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
     await this.options.service.resolveReviewerIssues(goal.id);
     for (const issue of artifacts.issues) await this.options.service.upsertIssue(goal.id, issue);
     return this.runEvaluator(goal, cwd, ownerAssignmentId);
+  }
+
+  private isWallTimeExhausted(goal: StoredLabGoal): boolean {
+    const startedAt = Date.parse(goal.createdAt);
+    if (!Number.isFinite(startedAt)) return true;
+    return this.now().getTime() - startedAt >= goal.budget.maxDurationMinutes * 60_000;
+  }
+
+  private canCreateAgent(goal: StoredLabGoal): boolean {
+    return goal.assignments.length < goal.budget.maxAgents;
   }
 }

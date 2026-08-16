@@ -67,6 +67,11 @@ re-runs the complete frozen command set. Repair rounds are hard-limited;
 duplicate evaluator failures require human input instead of looping. Only an
 evaluator-recorded passed acceptance gate can complete a Goal.
 
+Wall-time and maximum Agent count are enforced as hard budgets before a new
+worktree/Agent is created. Repair-round exhaustion is also terminal; estimated
+provider cost remains advisory because providers do not expose one reliable
+cross-provider billing signal.
+
 The daemon restores queued/planning/implementing Goals after restart. An
 existing Builder session is loaded from persistence before the Goal continues.
 Pause/cancel request the underlying Builder run to stop; a resume received

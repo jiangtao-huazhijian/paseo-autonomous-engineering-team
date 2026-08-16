@@ -45,6 +45,7 @@ describe("LabGoalOrchestrator", () => {
     const orchestrator = new LabGoalOrchestrator({
       service,
       logger: pino({ level: "silent" }),
+      now: () => new Date("2026-08-16T00:00:00.000Z"),
       createWorktree: async () =>
         ({
           workspace: { workspaceId: "wks_lab", cwd: "/worktree" },
@@ -127,6 +128,7 @@ describe("LabGoalOrchestrator", () => {
     const orchestrator = new LabGoalOrchestrator({
       service,
       logger: pino({ level: "silent" }),
+      now: () => new Date("2026-08-16T00:00:00.000Z"),
       createWorktree: async () =>
         ({
           workspace: { workspaceId: "wks_lab", cwd: "/worktree" },
@@ -214,6 +216,7 @@ describe("LabGoalOrchestrator", () => {
     const orchestrator = new LabGoalOrchestrator({
       service,
       logger: pino({ level: "silent" }),
+      now: () => new Date("2026-08-16T00:00:00.000Z"),
       createWorktree: async () =>
         ({
           workspace: { workspaceId: "wks_lab", cwd: "/worktree" },
@@ -275,5 +278,45 @@ describe("LabGoalOrchestrator", () => {
       { finder: "evaluator", ownerAssignmentId: completed?.assignments[0]?.id, severity: "high" },
     ]);
     expect(completed?.evidence).toHaveLength(6);
+  });
+
+  test("hard-stops before creating an Agent when the wall-time budget is exhausted", async () => {
+    const goal = await service.create({
+      title: "Expired Goal",
+      repositoryPath: "/repo",
+      mode: "deliver",
+      objective: "Never run",
+      acceptanceCriteria: ["npm test"],
+      allowedActions: ["src/**"],
+      forbiddenActions: [],
+      roleProviders: [
+        { role: "builder", provider: "codex" },
+        { role: "reviewer", provider: "claude" },
+      ],
+      budget: { maxRounds: 1, maxAgents: 2, maxDurationMinutes: 1, maxRepairRounds: 0 },
+    });
+    const queued = await service.action(goal.id, "queue");
+    let createCalls = 0;
+    const orchestrator = new LabGoalOrchestrator({
+      service,
+      logger: pino({ level: "silent" }),
+      now: () => new Date("2026-08-16T00:02:00.000Z"),
+      createWorktree: async () => {
+        throw new Error("must not create worktree");
+      },
+      createAgent: (async () => {
+        createCalls += 1;
+        return {} as never;
+      }) as BoundCreateAgentCommand,
+      agentManager: {
+        runAgent: async () => ({ canceled: false, finalText: "", timeline: [], sessionId: "s" }),
+        cancelAgentRun: async () => ({ status: "settled" }),
+      } as Pick<AgentManager, "runAgent" | "cancelAgentRun">,
+    });
+
+    await orchestrator.start(queued.id);
+
+    expect((await service.inspect(goal.id))?.state).toBe("budget_exhausted");
+    expect(createCalls).toBe(0);
   });
 });

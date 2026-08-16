@@ -10,9 +10,25 @@ const TERMINAL_STATES = new Set<LabGoalState>([
 
 const TRANSITIONS: Readonly<Record<LabGoalState, readonly LabGoalState[]>> = {
   draft: ["queued", "cancelled"],
-  queued: ["planning", "paused", "cancelled"],
-  planning: ["implementing", "needs_human", "blocked", "failed", "paused", "cancelled"],
-  implementing: ["reviewing", "needs_human", "blocked", "failed", "paused", "cancelled"],
+  queued: ["planning", "budget_exhausted", "paused", "cancelled"],
+  planning: [
+    "implementing",
+    "needs_human",
+    "budget_exhausted",
+    "blocked",
+    "failed",
+    "paused",
+    "cancelled",
+  ],
+  implementing: [
+    "reviewing",
+    "needs_human",
+    "budget_exhausted",
+    "blocked",
+    "failed",
+    "paused",
+    "cancelled",
+  ],
   reviewing: [
     "verifying",
     "repairing",
