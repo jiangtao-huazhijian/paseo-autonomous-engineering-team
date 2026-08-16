@@ -17,6 +17,7 @@ interface GoalCommandOptions {
   file?: string;
   queue?: boolean;
   reason?: string;
+  issue?: string;
 }
 
 interface GoalDaemonClient {
@@ -29,8 +30,9 @@ interface GoalDaemonClient {
   }): Promise<{ goal: StoredLabGoal | null; error: string | null }>;
   labGoalAction(input: {
     id: string;
-    action: "queue" | "pause" | "resume" | "cancel";
+    action: "queue" | "pause" | "resume" | "cancel" | "waive-issue";
     reason?: string;
+    issueId?: string;
   }): Promise<{ goal: StoredLabGoal | null; error: string | null }>;
   close(): Promise<void>;
 }
@@ -87,6 +89,9 @@ function inspectRows(goal: StoredLabGoal): Array<{ key: string; value: string }>
     { key: "Acceptance", value: goal.acceptanceCriteria.join("\n") },
     { key: "Assignments", value: JSON.stringify(goal.assignments) },
     { key: "Gates", value: JSON.stringify(goal.gateRecords) },
+    { key: "Issues", value: JSON.stringify(goal.issues) },
+    { key: "Evidence", value: JSON.stringify(goal.evidence) },
+    { key: "Audit", value: JSON.stringify(goal.auditEvents) },
     { key: "Transitions", value: JSON.stringify(goal.transitions) },
   ];
 }
@@ -210,6 +215,34 @@ function actionCommand(action: "queue" | "pause" | "resume" | "cancel") {
   };
 }
 
+async function runWaive(
+  id: string,
+  options: GoalCommandOptions,
+  _command: Command,
+): Promise<SingleResult<GoalRow>> {
+  if (!options.issue?.trim()) {
+    throw {
+      code: "MISSING_ISSUE",
+      message: "Provide --issue <issue-id> to waive",
+    } satisfies CommandError;
+  }
+  const client = await connectGoalClient(options.host);
+  try {
+    const payload = await client.labGoalAction({
+      id,
+      action: "waive-issue",
+      issueId: options.issue,
+      reason: options.reason || "Explicit human waiver",
+    });
+    if (payload.error || !payload.goal) throw new Error(payload.error ?? `Goal not found: ${id}`);
+    return { type: "single", data: toGoalRow(payload.goal), schema: goalSchema };
+  } catch (error) {
+    throw toGoalCommandError("GOAL_WAIVE_FAILED", "waive Issue", error);
+  } finally {
+    await client.close().catch(() => undefined);
+  }
+}
+
 export function createGoalCommand(): Command {
   const goal = new Command("goal").description("Manage durable Autonomous Lab Goals");
   addJsonAndDaemonHostOptions(
@@ -234,5 +267,13 @@ export function createGoalCommand(): Command {
         .option("--reason <text>", "Optional lifecycle reason"),
     ).action(withOutput(actionCommand(action)));
   }
+  addJsonAndDaemonHostOptions(
+    goal
+      .command("waive")
+      .description("Record an explicit human waiver for an open Issue")
+      .argument("<id>", "Goal ID")
+      .requiredOption("--issue <issue-id>", "Open Issue ID")
+      .option("--reason <text>", "Required audit reason", "Explicit human waiver"),
+  ).action(withOutput(runWaive));
   return goal;
 }

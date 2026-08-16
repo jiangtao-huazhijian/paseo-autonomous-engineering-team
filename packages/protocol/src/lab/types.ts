@@ -147,6 +147,13 @@ export const LabGoalTransitionSchema = z.object({
 });
 export type LabGoalTransition = z.infer<typeof LabGoalTransitionSchema>;
 
+export const LabGoalAuditEventSchema = z.object({
+  at: z.string(),
+  action: z.string().trim().min(1),
+  detail: z.string().trim().min(1),
+});
+export type LabGoalAuditEvent = z.infer<typeof LabGoalAuditEventSchema>;
+
 export const StoredLabGoalSchema = LabGoalSpecSchema.extend({
   id: z.string(),
   state: LabGoalStateSchema,
@@ -162,6 +169,7 @@ export const StoredLabGoalSchema = LabGoalSpecSchema.extend({
   gateRecords: z.array(LabGateRecordSchema),
   evidence: z.array(LabEvidenceSchema).default([]),
   issues: z.array(LabIssueSchema).default([]),
+  auditEvents: z.array(LabGoalAuditEventSchema).default([]),
 });
 export type StoredLabGoal = z.infer<typeof StoredLabGoalSchema>;
 

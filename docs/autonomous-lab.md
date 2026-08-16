@@ -79,6 +79,7 @@ paseo goal create --file goal.json --queue
 paseo goal ls
 paseo goal show <goal-id>
 paseo goal pause|resume|cancel <goal-id>
+paseo goal waive <goal-id> --issue <issue-id> --reason "accepted product risk"
 ```
 
 `goal.json` must be a complete `LabGoalSpec` (objective, repository, frozen

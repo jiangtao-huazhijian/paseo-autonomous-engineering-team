@@ -18,6 +18,7 @@ describe("goal command", () => {
       "pause",
       "resume",
       "cancel",
+      "waive",
     ]);
     expect(
       command.commands

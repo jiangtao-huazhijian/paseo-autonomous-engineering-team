@@ -11,7 +11,14 @@ import type {
 import { LabGoalStore } from "./store.js";
 import { resumeLabGoal, transitionLabGoal } from "./state-machine.js";
 
-export type LabGoalAction = "queue" | "pause" | "resume" | "cancel" | "start" | "mark-blocked";
+export type LabGoalAction =
+  | "queue"
+  | "pause"
+  | "resume"
+  | "cancel"
+  | "start"
+  | "mark-blocked"
+  | "waive-issue";
 
 export interface LabGoalOrchestrator {
   start(goalId: string): Promise<void>;
@@ -62,6 +69,7 @@ export class LabGoalService {
       gateRecords: [],
       evidence: [],
       issues: [],
+      auditEvents: [],
     });
   }
 
@@ -91,7 +99,12 @@ export class LabGoalService {
     return this.store.get(id);
   }
 
-  async action(id: string, action: LabGoalAction, reason?: string): Promise<StoredLabGoal> {
+  async action(
+    id: string,
+    action: LabGoalAction,
+    reason?: string,
+    issueId?: string,
+  ): Promise<StoredLabGoal> {
     const updated = await this.store.update(id, (goal) => {
       const message = reason?.trim() || `User requested ${action}`;
       switch (action) {
@@ -107,6 +120,33 @@ export class LabGoalService {
           return transitionLabGoal(goal, "cancelled", message, this.now());
         case "mark-blocked":
           return transitionLabGoal(goal, "blocked", message, this.now());
+        case "waive-issue": {
+          if (!issueId) throw new Error("waive-issue requires an issueId");
+          const issue = goal.issues.find((candidate) => candidate.id === issueId);
+          if (!issue) throw new Error(`Issue not found: ${issueId}`);
+          if (issue.status === "resolved")
+            throw new Error(`Resolved issue cannot be waived: ${issueId}`);
+          const timestamp = this.now().toISOString();
+          return {
+            ...goal,
+            issues: goal.issues.map((candidate) =>
+              candidate.id === issueId
+                ? {
+                    ...candidate,
+                    status: "waived",
+                    waivedAt: timestamp,
+                    waivedReason: message,
+                    updatedAt: timestamp,
+                  }
+                : candidate,
+            ),
+            auditEvents: [
+              ...goal.auditEvents,
+              { at: timestamp, action: "waive-issue", detail: `${issueId}: ${message}` },
+            ],
+            updatedAt: timestamp,
+          };
+        }
       }
     });
     if (!updated) {

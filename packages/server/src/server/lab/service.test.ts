@@ -111,4 +111,42 @@ describe("LabGoalService", () => {
 
     expect(restarted).toEqual([goal.id]);
   });
+
+  test("only an explicit audited user action can waive an open Issue", async () => {
+    const goal = await createGoal();
+    await service.upsertIssue(goal.id, {
+      id: "issue-1",
+      fingerprint: "fingerprint-1",
+      finder: "reviewer",
+      ownerAssignmentId: null,
+      severity: "high",
+      summary: "Accepted product risk",
+      reproduction: "Review evidence",
+      evidenceIds: [],
+      reacceptance: [],
+      status: "open",
+      createdAt: "2026-08-16T00:00:00.000Z",
+      updatedAt: "2026-08-16T00:00:00.000Z",
+      waivedAt: null,
+      waivedReason: null,
+    });
+
+    const waived = await service.action(
+      goal.id,
+      "waive-issue",
+      "Accepted by release owner",
+      "issue-1",
+    );
+
+    expect(waived.issues[0]).toMatchObject({
+      status: "waived",
+      waivedReason: "Accepted by release owner",
+    });
+    expect(waived.auditEvents).toEqual([
+      expect.objectContaining({
+        action: "waive-issue",
+        detail: "issue-1: Accepted by release owner",
+      }),
+    ]);
+  });
 });

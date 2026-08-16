@@ -769,8 +769,9 @@ export interface InspectLabGoalOptions {
   requestId?: string;
 }
 export interface LabGoalActionOptions extends InspectLabGoalOptions {
-  action: "queue" | "pause" | "resume" | "cancel" | "start" | "mark-blocked";
+  action: "queue" | "pause" | "resume" | "cancel" | "start" | "mark-blocked" | "waive-issue";
   reason?: string;
+  issueId?: string;
 }
 export interface LabGoalGateRecordOptions extends InspectLabGoalOptions {
   record: LabGateRecord;
@@ -5257,6 +5258,7 @@ export class DaemonClient {
         goalId: options.id,
         action: options.action,
         ...(options.reason ? { reason: options.reason } : {}),
+        ...(options.issueId ? { issueId: options.issueId } : {}),
       },
       responseType: "lab.goal.action.response",
     });

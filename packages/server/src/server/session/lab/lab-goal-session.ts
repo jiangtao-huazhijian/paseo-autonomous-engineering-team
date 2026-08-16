@@ -77,6 +77,7 @@ export class LabGoalSession {
                 request.goalId,
                 request.action,
                 request.reason,
+                request.issueId,
               ),
               error: null,
             },

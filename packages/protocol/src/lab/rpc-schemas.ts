@@ -21,8 +21,9 @@ export const LabGoalActionRequestSchema = z.object({
   type: z.literal("lab.goal.action.request"),
   requestId: z.string(),
   goalId: z.string(),
-  action: z.enum(["queue", "pause", "resume", "cancel", "start", "mark-blocked"]),
+  action: z.enum(["queue", "pause", "resume", "cancel", "start", "mark-blocked", "waive-issue"]),
   reason: z.string().trim().min(1).optional(),
+  issueId: z.string().trim().min(1).optional(),
 });
 
 /** Internal/evaluator-only RPC. The service still validates legal transitions. */
