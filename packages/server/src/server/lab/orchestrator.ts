@@ -54,6 +54,12 @@ function optionalVerifier(goal: StoredLabGoal) {
   return goal.roleProviders.find((role) => role.role === "verifier" && role.enabled) ?? null;
 }
 
+function requiresProviderIntervention(message: string): boolean {
+  return /provider.+(unavailable|not found)|authentication|credential|login required|rate limit|quota/i.test(
+    message,
+  );
+}
+
 function builderPrompt(goal: StoredLabGoal): string {
   const repairIssues = goal.issues.filter((issue) => issue.status === "open");
   return [
@@ -291,8 +297,10 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
         }
         await this.options.service.advance(
           goalId,
-          "failed",
-          `Builder execution failed: ${message}`,
+          requiresProviderIntervention(message) ? "needs_human" : "failed",
+          requiresProviderIntervention(message)
+            ? `Provider intervention required: ${message}`
+            : `Builder execution failed: ${message}`,
         );
       }
     } finally {
