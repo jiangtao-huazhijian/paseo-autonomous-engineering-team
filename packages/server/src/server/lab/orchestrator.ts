@@ -1,9 +1,11 @@
+import { execFile as execFileCallback } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
+import { promisify } from "node:util";
 import type { Logger } from "pino";
 import type { EvaluatorCommandResult } from "./evaluator.js";
 import { evaluateChangePolicy, evaluateCommand } from "./evaluator.js";
 import { reviewerPrompt, reviewOutputToArtifacts } from "./review.js";
-import type { StoredLabGoal } from "@getpaseo/protocol/lab/types";
+import type { LabEvidence, StoredLabGoal } from "@getpaseo/protocol/lab/types";
 import type { BoundCreateAgentCommand } from "../agent/create-agent/create.js";
 import { formatProviderModel } from "../agent/create-agent/create.js";
 import type { AgentManager } from "../agent/agent-manager.js";
@@ -14,6 +16,12 @@ import {
 } from "./service.js";
 
 type LabAgentManager = Pick<AgentManager, "runAgent" | "cancelAgentRun">;
+const execFile = promisify(execFileCallback);
+
+export interface LabWorkspaceSnapshot {
+  fingerprint: string;
+  summary: string;
+}
 
 export interface LabGoalOrchestratorOptions {
   service: LabGoalService;
@@ -28,6 +36,13 @@ export interface LabGoalOrchestratorOptions {
     command: string;
     now: () => Date;
   }) => Promise<EvaluatorCommandResult>;
+  /**
+   * A read-only snapshot of the shared Goal worktree. It protects the
+   * Builder/Reviewer separation: a Reviewer may inspect the worktree but may
+   * not alter it. Production uses Git; tests can provide a deterministic
+   * snapshot without a real worktree.
+   */
+  captureWorkspaceSnapshot?: (cwd: string) => Promise<LabWorkspaceSnapshot>;
   createWorktree: (input: {
     cwd: string;
     worktreeSlug: string;
@@ -58,6 +73,44 @@ function requiresProviderIntervention(message: string): boolean {
   return /provider.+(unavailable|not found)|authentication|credential|login required|rate limit|quota/i.test(
     message,
   );
+}
+
+async function captureGitWorkspaceSnapshot(cwd: string): Promise<LabWorkspaceSnapshot> {
+  const [head, status] = await Promise.all([
+    execFile("git", ["-C", cwd, "rev-parse", "HEAD"], { encoding: "utf8" }),
+    execFile("git", ["-C", cwd, "status", "--porcelain=v1", "--untracked-files=all"], {
+      encoding: "utf8",
+    }),
+  ]);
+  const summary = `HEAD ${head.stdout.trim()}\n${status.stdout}`.trim();
+  return {
+    fingerprint: createHash("sha256").update(summary).digest("hex"),
+    summary: summary.slice(0, 64 * 1024),
+  };
+}
+
+function reviewerMutationEvidence(input: {
+  goal: StoredLabGoal;
+  before: LabWorkspaceSnapshot;
+  after: LabWorkspaceSnapshot;
+  now: () => Date;
+}): LabEvidence {
+  const stdout = `Before reviewer:\n${input.before.summary}\n\nAfter reviewer:\n${input.after.summary}`.slice(
+    0,
+    64 * 1024,
+  );
+  return {
+    id: `evidence_${randomUUID()}`,
+    kind: "policy",
+    candidateHash: input.after.fingerprint,
+    command: "reviewer read-only worktree snapshot",
+    exitCode: 1,
+    stdout,
+    stderr: "Reviewer changed the shared Goal worktree; the modified worktree was preserved.",
+    environmentFingerprint: `reviewer-read-only:${input.goal.evaluatorVersion}`,
+    artifactHash: createHash("sha256").update(stdout).digest("hex"),
+    createdAt: input.now().toISOString(),
+  };
 }
 
 function builderPrompt(goal: StoredLabGoal): string {
@@ -468,12 +521,31 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
     return this.runEvaluatorCommands(verifyingGoal, cwd, ownerAssignmentId);
   }
 
+  // The reviewer leg owns both durable role assignment and the integrity boundary.
+  // oxlint-disable-next-line complexity
   private async runReviewer(
     goal: StoredLabGoal,
     cwd: string,
     ownerAssignmentId: string,
   ): Promise<boolean> {
     const reviewer = requireReviewer(goal);
+    let beforeSnapshot: LabWorkspaceSnapshot;
+    try {
+      beforeSnapshot = await (this.options.captureWorkspaceSnapshot ?? captureGitWorkspaceSnapshot)(
+        cwd,
+      );
+    } catch (error) {
+      this.options.logger.warn(
+        { err: error, goalId: goal.id, cwd },
+        "Lab Reviewer read-only protection could not snapshot worktree",
+      );
+      await this.options.service.advance(
+        goal.id,
+        "needs_human",
+        "Reviewer read-only protection could not snapshot the Goal worktree",
+      );
+      return false;
+    }
     const existing = goal.assignments.find(
       (assignment) => assignment.role === "reviewer" && assignment.agentId,
     );
@@ -530,6 +602,46 @@ export class LabGoalOrchestrator implements LabGoalOrchestratorContract {
     await this.options.ensureAgentLoaded?.(agentId);
     const result = await this.options.agentManager.runAgent(agentId, reviewerPrompt(goal));
     if (result.canceled) return false;
+    let afterSnapshot: LabWorkspaceSnapshot;
+    try {
+      afterSnapshot = await (this.options.captureWorkspaceSnapshot ?? captureGitWorkspaceSnapshot)(cwd);
+    } catch (error) {
+      this.options.logger.warn(
+        { err: error, goalId: goal.id, cwd },
+        "Lab Reviewer read-only protection could not re-snapshot worktree",
+      );
+      await this.options.service.updateAssignment(goal.id, assignmentId, {
+        state: "failed",
+        endedAt: this.now().toISOString(),
+        error: "Reviewer completed but worktree integrity could not be verified",
+      });
+      await this.options.service.advance(
+        goal.id,
+        "needs_human",
+        "Reviewer completed but read-only worktree integrity could not be verified",
+      );
+      return false;
+    }
+    if (beforeSnapshot.fingerprint !== afterSnapshot.fingerprint) {
+      const evidence = reviewerMutationEvidence({
+        goal,
+        before: beforeSnapshot,
+        after: afterSnapshot,
+        now: this.now,
+      });
+      await this.options.service.recordEvidence(goal.id, evidence);
+      await this.options.service.updateAssignment(goal.id, assignmentId, {
+        state: "failed",
+        endedAt: this.now().toISOString(),
+        error: "Reviewer changed the shared Goal worktree; preserved for human inspection",
+      });
+      await this.options.service.advance(
+        goal.id,
+        "needs_human",
+        "Reviewer changed the shared Goal worktree; preserved for human inspection",
+      );
+      return false;
+    }
     await this.options.service.updateAssignment(goal.id, assignmentId, {
       state: "succeeded",
       endedAt: this.now().toISOString(),

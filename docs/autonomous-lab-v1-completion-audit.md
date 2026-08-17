@@ -10,6 +10,7 @@ This is an evidence ledger, not a roadmap or a completion claim.
 | --- | --- | --- |
 | Web/PWA can create, view, pause, resume, cancel Goals | `LabGoalsScreen`, Goal API/CLI, app typecheck/lint, focused session tests | Code verified; no paired-phone runtime evidence |
 | Builder/Reviewer independent Provider assignments | Goal validates different Builder/Reviewer providers; orchestrator stores assignments | Code verified; no real Provider turns |
+| Reviewer default read-only boundary | Git HEAD/status snapshots before and after review; a mutation is preserved as policy Evidence and forces `needs_human` | Code verified; detection, not OS-level sandboxing or real Provider evidence |
 | Reviewer/Verifier issue returns to original Builder | Orchestrator repair-loop tests exercise Builder → Reviewer → Evaluator → Verifier → Builder | Simulated runtime verified; no real turns |
 | Failed required Gate cannot complete | Evaluator-only internal Gate writer; public Gate RPC removed; state-machine/service tests | Code verified |
 | Passing gates + no blocking Issue + Evidence generate completion | Evaluator, policy, issue, report tests | Simulated runtime verified |

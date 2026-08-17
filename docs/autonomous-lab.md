@@ -45,7 +45,6 @@ the first real execution leg:
 - `lab.goal.list.request`
 - `lab.goal.inspect.request`
 - `lab.goal.action.request`
-- `lab.goal.gate-record.request`
 
 Queue creates one dedicated Paseo-managed worktree and one persisted **Builder**
 assignment. The Builder is a real Paseo agent, constrained to that worktree and
@@ -55,8 +54,13 @@ evaluator assets. When the Builder finishes, the Goal enters `reviewing`.
 The first heterogeneous review and evaluator loops are now present. A Reviewer
 is created as a separate Paseo Agent using the configured Reviewer provider;
 its provider must differ from the Builder's. The Reviewer is instructed to
-remain read-only and must return schema-validated JSON Issues. High/critical
-review Issues route back to the original Builder before deterministic evaluation.
+remain read-only and must return schema-validated JSON Issues. Before and after
+each review, the server captures a Git `HEAD` plus porcelain-status snapshot of
+the shared Goal worktree. A changed snapshot is retained as policy Evidence;
+the Reviewer is marked failed and the Goal enters `needs_human` without
+overwriting the worktree. This detects writes but is not an OS-level read-only
+sandbox. High/critical review Issues route back to the original Builder before
+deterministic evaluation.
 
 An optional Verifier provider is launched only after a frozen Evaluator command
 fails. It reproduces and diagnoses the failure into the same Evidence/Issue
@@ -128,10 +132,9 @@ budget), rather than an underspecified free-form prompt.
 
 ## Explicitly not implemented yet
 
-This is not yet a complete heterogeneous team: independent Reviewer and
-optional Verifier assignments, read-only enforcement, review Issue/waive UI,
-allowed/forbidden-path policy Gates, outbox reconciliation, hidden-test
-isolation, and final reports are the next slices.
+This is not yet a complete heterogeneous team: OS-level read-only sandboxing
+for Reviewer/Verifier, review Issue/waive UI, outbox reconciliation, hidden-test
+isolation, and real-world Provider/mobile/soak evidence remain outstanding.
 
 ## Acceptance checks for this slice
 

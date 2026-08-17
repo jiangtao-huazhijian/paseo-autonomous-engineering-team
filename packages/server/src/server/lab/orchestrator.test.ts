@@ -12,6 +12,10 @@ import { LabGoalService } from "./service.js";
 describe("LabGoalOrchestrator", () => {
   let home: string;
   let service: LabGoalService;
+  const stableWorkspaceSnapshot = async () => ({
+    fingerprint: "unchanged-worktree",
+    summary: "HEAD test\n",
+  });
 
   beforeEach(async () => {
     home = await mkdtemp(join(tmpdir(), "paseo-lab-orchestrator-"));
@@ -46,6 +50,7 @@ describe("LabGoalOrchestrator", () => {
       service,
       logger: pino({ level: "silent" }),
       now: () => new Date("2026-08-16T00:00:00.000Z"),
+      captureWorkspaceSnapshot: stableWorkspaceSnapshot,
       createWorktree: async () =>
         ({
           workspace: { workspaceId: "wks_lab", cwd: "/worktree" },
@@ -105,6 +110,78 @@ describe("LabGoalOrchestrator", () => {
     expect(receivedPrompt).toContain("evaluator/**");
   });
 
+  test("preserves evidence and escalates when a Reviewer changes the shared worktree", async () => {
+    const goal = await service.create({
+      title: "Reviewer must not edit",
+      repositoryPath: "/repo",
+      mode: "deliver",
+      objective: "Inspect a Builder change without modifying it",
+      acceptanceCriteria: ["npm test"],
+      allowedActions: ["src/**"],
+      forbiddenActions: [],
+      roleProviders: [
+        { role: "builder", provider: "codex" },
+        { role: "reviewer", provider: "claude" },
+      ],
+      budget: { maxRounds: 1, maxAgents: 2, maxDurationMinutes: 60, maxRepairRounds: 0 },
+    });
+    const queued = await service.action(goal.id, "queue");
+    let snapshotCalls = 0;
+    const orchestrator = new LabGoalOrchestrator({
+      service,
+      logger: pino({ level: "silent" }),
+      now: () => new Date("2026-08-16T00:00:00.000Z"),
+      captureWorkspaceSnapshot: async () => {
+        snapshotCalls += 1;
+        return snapshotCalls === 1
+          ? { fingerprint: "before", summary: "HEAD builder\n M src/app.ts" }
+          : { fingerprint: "after", summary: "HEAD builder\n M src/app.ts\n M test/app.test.ts" };
+      },
+      createWorktree: async () =>
+        ({
+          workspace: { workspaceId: "wks_lab", cwd: "/worktree" },
+        }) as CreatePaseoWorktreeWorkflowResult,
+      createAgent: (async () =>
+        ({
+          snapshot: { id: "agent" },
+          initialPromptError: null,
+        }) as never) as BoundCreateAgentCommand,
+      evaluateCommand: async () => {
+        throw new Error("evaluator must not run after a Reviewer write");
+      },
+      agentManager: {
+        runAgent: async (_agentId, prompt) => ({
+          canceled: false,
+          finalText: String(prompt).includes("independent Reviewer")
+            ? '{"issues":[]}'
+            : "Builder finished",
+          timeline: [],
+          sessionId: "s",
+        }),
+        cancelAgentRun: async () => ({ status: "settled" }),
+      } as Pick<AgentManager, "runAgent" | "cancelAgentRun">,
+    });
+
+    await orchestrator.start(queued.id);
+
+    const updated = await service.inspect(goal.id);
+    expect(updated).toMatchObject({ state: "needs_human" });
+    expect(updated?.assignments.find((assignment) => assignment.role === "reviewer")).toMatchObject({
+      state: "failed",
+      error: expect.stringContaining("changed the shared Goal worktree"),
+    });
+    expect(updated?.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "policy",
+          command: "reviewer read-only worktree snapshot",
+          exitCode: 1,
+          stdout: expect.stringContaining("After reviewer"),
+        }),
+      ]),
+    );
+  });
+
   test("replays a resume after a running Builder has been cancelled", async () => {
     const goal = await service.create({
       title: "Resumable Builder",
@@ -129,6 +206,7 @@ describe("LabGoalOrchestrator", () => {
       service,
       logger: pino({ level: "silent" }),
       now: () => new Date("2026-08-16T00:00:00.000Z"),
+      captureWorkspaceSnapshot: stableWorkspaceSnapshot,
       createWorktree: async () =>
         ({
           workspace: { workspaceId: "wks_lab", cwd: "/worktree" },
@@ -218,6 +296,7 @@ describe("LabGoalOrchestrator", () => {
       service,
       logger: pino({ level: "silent" }),
       now: () => new Date("2026-08-16T00:00:00.000Z"),
+      captureWorkspaceSnapshot: stableWorkspaceSnapshot,
       createWorktree: async () =>
         ({
           workspace: { workspaceId: "wks_lab", cwd: "/worktree" },
@@ -381,6 +460,7 @@ describe("LabGoalOrchestrator", () => {
       service,
       logger: pino({ level: "silent" }),
       now: () => new Date("2026-08-16T00:00:00.000Z"),
+      captureWorkspaceSnapshot: stableWorkspaceSnapshot,
       resolveWorkspaceCwd: async (id) => {
         resolvedWorkspace = id;
         return "/restored-worktree";
